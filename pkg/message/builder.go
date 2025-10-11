@@ -302,6 +302,12 @@ func (b *MapBuilder) WithTraceContext(traceContext map[string]string) *MapBuilde
 	return b
 }
 
+// WithRetained marks the message as retained (for event messages)
+func (b *MapBuilder) WithRetained(retained bool) *MapBuilder {
+	b.msg["retained"] = retained
+	return b
+}
+
 // WithField adds a custom field to the message
 func (b *MapBuilder) WithField(key string, value any) *MapBuilder {
 	b.msg[key] = value

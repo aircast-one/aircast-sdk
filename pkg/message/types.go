@@ -21,6 +21,7 @@ const (
 	TypeResponse MessageType = "response"
 	TypeError    MessageType = "error"
 	TypeEvent    MessageType = "event"
+	TypeWill     MessageType = "will" // Last Will and Testament
 )
 
 // System identifiers (sources)
@@ -104,7 +105,23 @@ type EventMessage struct {
 	Source       MessageSource      `json:"source"`
 	Destination  MessageDestination `json:"destination"`
 	ChannelID    ChannelID          `json:"channel_id,omitempty"`
+	Retained     bool               `json:"retained,omitempty"`      // If true, API stores and sends to new clients
 	TraceContext map[string]string  `json:"trace_context,omitempty"` // W3C Trace Context (traceparent, tracestate)
+}
+
+// WillMessage defines the Last Will and Testament message
+// Sent by API if connection closes unexpectedly
+type WillMessage struct {
+	Action       MessageAction      `json:"action"`
+	Payload      any                `json:"payload,omitempty"`
+	Destination  MessageDestination `json:"destination"`
+	TraceContext map[string]string  `json:"trace_context,omitempty"` // W3C Trace Context (traceparent, tracestate)
+}
+
+// SessionConfig configures persistent session behavior
+type SessionConfig struct {
+	ClientID     string `json:"client_id"`     // Persistent client identifier
+	CleanSession bool   `json:"clean_session"` // If true, discard queued messages
 }
 
 // Channel represents a communication channel

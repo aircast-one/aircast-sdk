@@ -424,7 +424,7 @@ func (qc *QueuedClient) GetQueueSize() int {
 }
 
 // GetQueueStats returns statistics about the queue
-func (qc *QueuedClient) GetQueueStats() map[string]interface{} {
+func (qc *QueuedClient) GetQueueStats() map[string]any {
 	qc.queueMutex.Lock()
 	defer qc.queueMutex.Unlock()
 
@@ -443,7 +443,7 @@ func (qc *QueuedClient) GetQueueStats() map[string]interface{} {
 		}
 	}
 
-	stats := map[string]interface{}{
+	stats := map[string]any{
 		"total":    len(qc.queue),
 		"critical": critical,
 		"normal":   normal,
@@ -474,4 +474,14 @@ func (qc *QueuedClient) WaitForQueueEmpty(timeout time.Duration) bool {
 		<-ticker.C
 	}
 	return false
+}
+
+// RegisterWill registers a Last Will message (delegates to underlying client)
+func (qc *QueuedClient) RegisterWill(will WillMessage) error {
+	return qc.client.RegisterWill(will)
+}
+
+// ClearWill clears the Last Will message (delegates to underlying client)
+func (qc *QueuedClient) ClearWill() error {
+	return qc.client.ClearWill()
 }

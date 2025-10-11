@@ -84,6 +84,12 @@ func UnmarshalMessage(data []byte) (any, error) {
 			return nil, fmt.Errorf("failed to unmarshal to EventMessage: %w", err)
 		}
 		return event, nil
+	case TypeWill:
+		var will WillMessage
+		if err := json.Unmarshal(data, &will); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal to WillMessage: %w", err)
+		}
+		return will, nil
 	default:
 		return nil, fmt.Errorf("unknown message type: %s", messageType)
 	}
@@ -103,7 +109,7 @@ func validateMessage(msg map[string]any) error {
 
 	// Validate type is one of the allowed values from the protocol
 	switch msgType {
-	case TypeRequest, TypeResponse, TypeError, TypeEvent:
+	case TypeRequest, TypeResponse, TypeError, TypeEvent, TypeWill:
 		// Valid type according to protocol.md
 	default:
 		return fmt.Errorf("%w: '%s' is not a valid message type according to protocol", ErrInvalidMessageType, msgType)

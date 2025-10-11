@@ -115,11 +115,12 @@ All messages must include these fields:
 
 ```typescript
 interface BaseMessage {
-  type: 'request' | 'response' | 'error' | 'event';
+  type: 'request' | 'response' | 'error' | 'event' | 'will';
   action: string;                    // Action identifier
   source: 'client' | 'device' | 'api'; // Who sent this message
   destination: 'web' | 'device' | 'api' | 'broadcast'; // Where to route it
   request_id?: string;               // For request/response correlation
+  retained?: boolean;                // If true, store and send to new clients (events only)
   trace_context?: {                  // W3C Trace Context for distributed tracing
     traceparent: string;
     tracestate?: string;
@@ -181,7 +182,7 @@ client.SendEvent(message.EventMessage{
     Action:      "mavlink.telemetry.update",
     Source:      message.SystemDevice,
     Destination: message.DestinationWeb,
-    Payload: map[string]interface{}{
+    Payload: map[string]any{
         "altitude": 100,
         "speed":    25,
     },
@@ -192,7 +193,7 @@ client.SendEvent(message.EventMessage{
     Action:      "device.heartbeat",
     Source:      message.SystemDevice,
     Destination: message.DestinationAPI,
-    Payload: map[string]interface{}{
+    Payload: map[string]any{
         "uptime":      3600,
         "memory_used": 45,
     },
@@ -242,7 +243,7 @@ client.SendEvent(message.EventMessage{
     Action:      "device.health.report",
     Source:      message.SystemDevice,
     Destination: message.DestinationAPI, // API processes, not forwarded to web
-    Payload: map[string]interface{}{
+    Payload: map[string]any{
         "cpu_load":    23,
         "memory_used": 45,
         "uptime":      3600,
@@ -257,7 +258,7 @@ client.SendEvent(message.EventMessage{
     Action:      "device.alert.critical",
     Source:      message.SystemDevice,
     Destination: message.DestinationBroadcast, // Goes to web + API
-    Payload: map[string]interface{}{
+    Payload: map[string]any{
         "severity": "critical",
         "message":  "Camera connection lost",
     },
@@ -299,10 +300,172 @@ LOG_LEVEL=debug ./aircast-api
 [DEVICE→API] Message for API processing, not forwarding to web
 ```
 
+## Protocol Enhancements
+
+### Retained Messages
+
+**Status:** ✅ Implemented in SDK
+
+Retained messages allow devices to mark important state updates that should be immediately delivered to new web clients upon connection.
+
+**Use Case:** When a new web client connects, it needs to see the current device state (battery level, GPS position, connection status) without waiting for the next update.
+
+**How it works:**
+1. Device sends event with `retained: true`
+2. API server stores the latest retained message per action
+3. When a new web client connects, API immediately sends all retained messages
+4. Subsequent updates replace the stored retained message
+
+**Example:**
+
+```go
+// Device sends retained telemetry
+client.SendEvent(message.EventMessage{
+    Action:      "mavlink.telemetry.battery",
+    Payload:     map[string]any{"level": 85, "voltage": 12.4},
+    Source:      message.SystemDevice,
+    Destination: message.DestinationWeb,
+    Retained:    true,  // Store and send to new clients
+})
+
+// Streaming data (not retained)
+client.SendEvent(message.EventMessage{
+    Action:      "mavlink.telemetry.gps.stream",
+    Payload:     gpsData,
+    Source:      message.SystemDevice,
+    Destination: message.DestinationWeb,
+    Retained:    false,  // Don't store, too frequent
+})
+```
+
+**What should be retained:**
+- ✅ Battery status
+- ✅ Connection status
+- ✅ Last known GPS position
+- ✅ Device configuration
+- ❌ High-frequency streaming data
+- ❌ Ephemeral signaling messages (WebRTC ICE candidates)
+- ❌ Log entries
+
+### Last Will and Testament (LWT)
+
+**Status:** ✅ Implemented in SDK
+
+Last Will allows devices to register a message that will be automatically sent by the API if the connection closes unexpectedly (crash, network loss).
+
+**Use Case:** Web clients need immediate notification when a device disconnects unexpectedly, not just a timeout.
+
+**How it works:**
+1. Device registers will message on connection using `client.RegisterWill()`
+2. API stores the will for this device/session
+3. If connection closes gracefully → will is cleared and not sent
+4. If connection closes unexpectedly → API sends will message to specified destination
+
+**Example:**
+
+```go
+// Register will on connect
+client.RegisterWill(message.WillMessage{
+    Action:      "device.status",
+    Payload:     map[string]any{
+        "status":    "offline",
+        "reason":    "connection_lost",
+        "timestamp": time.Now(),
+    },
+    Destination: message.DestinationBroadcast,
+})
+
+// Graceful disconnect (clears will first)
+client.ClearWill()  // Will not be executed
+client.SendEvent(message.EventMessage{
+    Action:      "device.status",
+    Payload:     map[string]any{"status": "offline", "reason": "shutdown"},
+    Source:      message.SystemDevice,
+    Destination: message.DestinationBroadcast,
+})
+client.Close()
+```
+
+**Message Types:**
+
+```typescript
+interface WillMessage {
+  action: string;
+  payload?: any;
+  destination: 'web' | 'api' | 'broadcast';
+  trace_context?: {
+    traceparent: string;
+    tracestate?: string;
+  };
+}
+```
+
+### Persistent Sessions
+
+**Status:** ✅ Protocol defined (API implementation required)
+
+Persistent sessions allow messages to survive device restarts and temporary disconnections.
+
+**Use Case:** Critical commands (firmware updates, configuration changes) sent while device is offline must be delivered when it reconnects.
+
+**How it works:**
+1. Device connects with a stable `clientID` and `cleanSession: false`
+2. When device is offline, API queues messages in persistent storage (database/Redis)
+3. When device reconnects with same `clientID`, API delivers all queued messages
+4. Messages have configurable TTL and priority
+
+**Example:**
+
+```go
+// Device connects with persistent session
+client.Connect(message.SessionConfig{
+    ClientID:     "device-123-abc",  // Stable ID across restarts
+    CleanSession: false,             // Keep queued messages
+})
+
+// Web sends command while device offline
+// → API queues message in database
+
+// Device reconnects (after restart)
+client.Connect(message.SessionConfig{
+    ClientID:     "device-123-abc",  // Same ID
+    CleanSession: false,
+})
+// → API delivers all queued commands
+```
+
+**Session Configuration:**
+
+```typescript
+interface SessionConfig {
+  client_id: string;      // Stable identifier for the client
+  clean_session: boolean; // true = discard old messages, false = keep queued
+}
+```
+
+**Queue Properties:**
+- Messages have priority (critical commands first)
+- Messages have TTL (expire after configurable time)
+- Queue size limits (oldest non-critical dropped first)
+- Persistent storage (survives API restart)
+
+### Protocol Enhancement Summary
+
+| Feature | Status | Benefit | Complexity |
+|---------|--------|---------|------------|
+| Retained Messages | ✅ SDK Ready | New clients get instant state | Low |
+| Last Will | ✅ SDK Ready | Auto disconnect notifications | Low |
+| Persistent Sessions | 📋 Protocol Defined | Messages survive restarts | High |
+
+**Implementation Status:**
+- **SDK (Go)**: All three features implemented in protocol types
+- **API Server**: Requires implementation of storage and routing logic (see [PROTOCOL_ENHANCEMENTS.md](docs/PROTOCOL_ENHANCEMENTS.md))
+
 ## Future Enhancements
 
-Potential future additions:
+Additional potential features:
 - **Destination filtering** - Filter by specific web session IDs
 - **Priority routing** - High-priority messages take precedence
 - **Destination groups** - Route to named groups of clients
 - **Conditional routing** - Route based on message content
+- **Topic-based routing** - Combine destination with topic patterns for more granular subscriptions

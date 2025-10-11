@@ -95,7 +95,7 @@ func TestClient_Listen(t *testing.T) {
 		}()
 
 		// Create and send a valid request message
-		reqMsg := map[string]interface{}{
+		reqMsg := map[string]any{
 			"type":       TypeRequest,
 			"action":     "test_action",
 			"source":     SystemDevice,
@@ -142,7 +142,7 @@ func TestClient_Listen(t *testing.T) {
 		conn.msgCh <- []byte("invalid json")
 
 		// Send valid JSON but invalid message structure
-		invalidMsg := map[string]interface{}{
+		invalidMsg := map[string]any{
 			"invalid": "structure",
 		}
 		msgBytes, _ := json.Marshal(invalidMsg)
@@ -203,7 +203,7 @@ func TestClient_Send(t *testing.T) {
 		}
 
 		conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
-			var envelope map[string]interface{}
+			var envelope map[string]any
 			_ = json.Unmarshal(data, &envelope)
 			return envelope["type"] == TypeRequest && envelope["action"] == "test_action"
 		})).Return(nil)
@@ -230,7 +230,7 @@ func TestClient_Send(t *testing.T) {
 		}
 
 		conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
-			var envelope map[string]interface{}
+			var envelope map[string]any
 			_ = json.Unmarshal(data, &envelope)
 			return envelope["type"] == TypeResponse && envelope["reply_to"] == "req-123"
 		})).Return(nil)
@@ -260,7 +260,7 @@ func TestClient_Send(t *testing.T) {
 		}
 
 		conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
-			var envelope map[string]interface{}
+			var envelope map[string]any
 			_ = json.Unmarshal(data, &envelope)
 			return envelope["type"] == TypeError
 		})).Return(nil)
@@ -286,7 +286,7 @@ func TestClient_Send(t *testing.T) {
 		}
 
 		conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
-			var envelope map[string]interface{}
+			var envelope map[string]any
 			_ = json.Unmarshal(data, &envelope)
 			return envelope["type"] == TypeEvent && envelope["action"] == "test_event"
 		})).Return(nil)
@@ -313,7 +313,7 @@ func TestClient_Send(t *testing.T) {
 		}
 
 		conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
-			var envelope map[string]interface{}
+			var envelope map[string]any
 			_ = json.Unmarshal(data, &envelope)
 			return envelope["channel_id"] == "channel-123"
 		})).Return(nil)
@@ -410,7 +410,7 @@ func TestClient_SendBroadcastMessage(t *testing.T) {
 	}
 
 	conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
-		var envelope map[string]interface{}
+		var envelope map[string]any
 		_ = json.Unmarshal(data, &envelope)
 		// Broadcast messages should not have channel_id
 		_, hasChannelID := envelope["channel_id"]
@@ -441,7 +441,7 @@ func TestClient_SendResponse(t *testing.T) {
 	payload := map[string]string{"status": "success"}
 
 	conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
-		var envelope map[string]interface{}
+		var envelope map[string]any
 		_ = json.Unmarshal(data, &envelope)
 		return envelope["type"] == TypeResponse &&
 			envelope["action"] == "test_action" &&
@@ -478,9 +478,9 @@ func TestClient_SendErrorToChannel(t *testing.T) {
 	}
 
 	conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
-		var envelope map[string]interface{}
+		var envelope map[string]any
 		_ = json.Unmarshal(data, &envelope)
-		errorField := envelope["error"].(map[string]interface{})
+		errorField := envelope["error"].(map[string]any)
 		return envelope["type"] == TypeError &&
 			envelope["action"] == "test_action" &&
 			envelope["reply_to"] == "req-123" &&
@@ -507,7 +507,7 @@ func TestClient_SendEventToChannel(t *testing.T) {
 	sessionID := ChannelID("session-123")
 
 	conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
-		var envelope map[string]interface{}
+		var envelope map[string]any
 		_ = json.Unmarshal(data, &envelope)
 		return envelope["type"] == TypeEvent &&
 			envelope["action"] == "device_connected" &&

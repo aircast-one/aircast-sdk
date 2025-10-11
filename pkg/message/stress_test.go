@@ -107,7 +107,7 @@ func TestHighVolumeMessageProcessing(t *testing.T) {
 
 	// Send high volume of messages
 	for i := range numMessages {
-		msg := map[string]interface{}{
+		msg := map[string]any{
 			"type":    TypeEvent,
 			"action":  "high_volume_test",
 			"source":  SystemDevice,
@@ -217,7 +217,7 @@ func TestConcurrentClientsStress(t *testing.T) {
 					Action:    "stress_test",
 					Source:    SystemDevice,
 					RequestID: string(rune(clientID*10000 + j)),
-					Payload: map[string]interface{}{
+					Payload: map[string]any{
 						"client": clientID,
 						"seq":    j,
 					},
@@ -229,7 +229,7 @@ func TestConcurrentClientsStress(t *testing.T) {
 				}
 
 				// Send test message to self
-				testMsg := map[string]interface{}{
+				testMsg := map[string]any{
 					"type":    TypeEvent,
 					"action":  "self_test",
 					"source":  SystemDevice,
@@ -308,7 +308,7 @@ func TestMemoryPressure(t *testing.T) {
 	// Send messages with large payloads
 	const numLargeMessages = 100
 	for i := 0; i < numLargeMessages; i++ {
-		msg := map[string]interface{}{
+		msg := map[string]any{
 			"type":       TypeRequest,
 			"action":     "memory_pressure_test",
 			"source":     SystemDevice,
@@ -398,7 +398,7 @@ func TestNetworkSimulation(t *testing.T) {
 				}
 
 				// Send test message
-				testMsg := map[string]interface{}{
+				testMsg := map[string]any{
 					"type":   TypeEvent,
 					"action": "network_test",
 					"source": SystemDevice,
@@ -525,7 +525,7 @@ func TestResourceExhaustion(t *testing.T) {
 
 	// Fast producer
 	for range numMessages {
-		msg := map[string]interface{}{
+		msg := map[string]any{
 			"type":   TypeEvent,
 			"action": "resource_exhaustion",
 			"source": SystemDevice,

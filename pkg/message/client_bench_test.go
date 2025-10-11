@@ -188,7 +188,7 @@ func BenchmarkClientListen(b *testing.B) {
 	}()
 
 	// Prepare test message
-	msg := map[string]interface{}{
+	msg := map[string]any{
 		"type":       TypeRequest,
 		"action":     "benchmark_action",
 		"source":     SystemDevice,

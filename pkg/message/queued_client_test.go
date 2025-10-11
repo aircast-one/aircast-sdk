@@ -77,6 +77,16 @@ func (m *MockClient) SendEventToChannel(action MessageAction, payload any, sessi
 	return args.Error(0)
 }
 
+func (m *MockClient) RegisterWill(will WillMessage) error {
+	args := m.Called(will)
+	return args.Error(0)
+}
+
+func (m *MockClient) ClearWill() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
 func (m *MockClient) SetClosed(closed bool) {
 	m.closedLock.Lock()
 	m.closed = closed

@@ -153,9 +153,9 @@ func BenchmarkUnmarshalMessagePayloadSize(b *testing.B) {
 		mediumPayload[string(rune('a'+i%26))+string(rune(i))] = "value" + string(rune(i))
 	}
 
-	largePayload := make(map[string]interface{})
+	largePayload := make(map[string]any)
 	for i := range 1000 {
-		largePayload["key"+string(rune(i))] = map[string]interface{}{
+		largePayload["key"+string(rune(i))] = map[string]any{
 			"nested": "value",
 			"index":  i,
 			"data":   "lorem ipsum dolor sit amet consectetur adipiscing elit",
@@ -163,7 +163,7 @@ func BenchmarkUnmarshalMessagePayloadSize(b *testing.B) {
 	}
 
 	b.Run("Small", func(b *testing.B) {
-		msg := map[string]interface{}{
+		msg := map[string]any{
 			"type":       TypeRequest,
 			"action":     "test",
 			"source":     SystemDevice,
@@ -182,7 +182,7 @@ func BenchmarkUnmarshalMessagePayloadSize(b *testing.B) {
 	})
 
 	b.Run("Medium", func(b *testing.B) {
-		msg := map[string]interface{}{
+		msg := map[string]any{
 			"type":       TypeRequest,
 			"action":     "test",
 			"source":     SystemDevice,
@@ -201,7 +201,7 @@ func BenchmarkUnmarshalMessagePayloadSize(b *testing.B) {
 	})
 
 	b.Run("Large", func(b *testing.B) {
-		msg := map[string]interface{}{
+		msg := map[string]any{
 			"type":       TypeRequest,
 			"action":     "test",
 			"source":     SystemDevice,

@@ -53,7 +53,7 @@ func main() {
     // Send an event to web clients
     client.SendEventToChannel(
         "telemetry.update",
-        map[string]interface{}{
+        map[string]any{
             "altitude": 100,
             "speed": 25,
         },
@@ -106,7 +106,7 @@ client.Send(message.RequestMessage{
     Source:      message.SystemClient,
     Destination: message.DestinationDevice,
     RequestID:   "req-123",
-    Payload:     map[string]interface{}{},
+    Payload:     map[string]any{},
 }, &channelID)
 ```
 
@@ -114,7 +114,7 @@ client.Send(message.RequestMessage{
 Server responses to requests:
 
 ```go
-client.SendResponse(request, map[string]interface{}{
+client.SendResponse(request, map[string]any{
     "status": "success",
 })
 ```

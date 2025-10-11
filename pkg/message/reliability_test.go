@@ -140,7 +140,7 @@ func TestMessageReliability(t *testing.T) {
 
 		// Send messages
 		for i := 0; i < numMessages; i++ {
-			msg := map[string]interface{}{
+			msg := map[string]any{
 				"type":       TypeRequest,
 				"action":     "test_action",
 				"source":     SystemDevice,
@@ -182,7 +182,7 @@ func TestMessageReliability(t *testing.T) {
 		// Send more messages than buffer size (10,000)
 		const numMessages = 12000
 		for i := 0; i < numMessages; i++ {
-			msg := map[string]interface{}{
+			msg := map[string]any{
 				"type":       TypeRequest,
 				"action":     "overflow_test",
 				"source":     SystemDevice,
@@ -234,7 +234,7 @@ func TestMessageReliability(t *testing.T) {
 		}()
 
 		// Send a message
-		msg := map[string]interface{}{
+		msg := map[string]any{
 			"type":       TypeRequest,
 			"action":     "test_stuck",
 			"source":     SystemDevice,
@@ -396,7 +396,7 @@ func TestMessageChannelDeadlock(t *testing.T) {
 
 	// Fill the message channel
 	for i := 0; i < 600; i++ { // More than buffer size
-		msg := map[string]interface{}{
+		msg := map[string]any{
 			"type":       TypeRequest,
 			"action":     "deadlock_test",
 			"source":     SystemDevice,
@@ -469,7 +469,7 @@ func TestMemoryLeaks(t *testing.T) {
 			Action:    "memory_test",
 			Source:    SystemDevice,
 			RequestID: string(rune(i)),
-			Payload: map[string]interface{}{
+			Payload: map[string]any{
 				"index": i,
 				"data":  "test data that should not leak",
 			},
@@ -477,7 +477,7 @@ func TestMemoryLeaks(t *testing.T) {
 		_ = client.Send(msg, nil)
 
 		// Receive message
-		testMsg := map[string]interface{}{
+		testMsg := map[string]any{
 			"type":       TypeRequest,
 			"action":     "memory_test",
 			"source":     SystemDevice,
@@ -538,7 +538,7 @@ func BenchmarkMessageReliability(b *testing.B) {
 	}()
 
 	// Prepare message
-	msg := map[string]interface{}{
+	msg := map[string]any{
 		"type":       TypeRequest,
 		"action":     "bench_reliability",
 		"source":     SystemDevice,

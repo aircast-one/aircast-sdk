@@ -12,7 +12,7 @@ import (
 
 // Pool for reusing bytes.Buffer for JSON encoding
 var bufferPool = sync.Pool{
-	New: func() interface{} {
+	New: func() any {
 		return bytes.NewBuffer(make([]byte, 0, 512)) // Pre-allocate 512 bytes
 	},
 }
@@ -45,6 +45,12 @@ type Client interface {
 	SendErrorToChannel(req *RequestMessage, payload ErrorResponse) error
 
 	SendEventToChannel(action MessageAction, payload any, sessionID ChannelID) error
+
+	// RegisterWill registers a Last Will message to be sent if connection closes unexpectedly
+	RegisterWill(will WillMessage) error
+
+	// ClearWill clears the Last Will message (use before graceful disconnect)
+	ClearWill() error
 }
 
 // Connection represents a WebSocket connection
@@ -257,31 +263,108 @@ func (c *client) SendBroadcastMessage(msg any) error {
 
 func (c *client) SendResponse(req *RequestMessage, payload any) error {
 	return c.Send(ResponseMessage{
-		Action:    req.Action,
-		Payload:   payload,
-		Source:    c.source,
-		ChannelID: req.ChannelID,
-		ReplyTo:   req.RequestID,
+		Action:      req.Action,
+		Payload:     payload,
+		Source:      c.source,
+		Destination: MessageDestination(req.Source),
+		ChannelID:   req.ChannelID,
+		ReplyTo:     req.RequestID,
 	}, &req.ChannelID)
 }
 
 func (c *client) SendEventToChannel(action MessageAction, payload any, channelID ChannelID) error {
+	// Extract destination from channel ID (e.g., "web:xxx" -> "web")
+	destination := extractDestinationFromChannelID(channelID)
+
 	return c.Send(EventMessage{
-		Action:    action,
-		Payload:   payload,
-		Source:    c.source,
-		ChannelID: channelID,
+		Action:      action,
+		Payload:     payload,
+		Source:      c.source,
+		Destination: destination,
+		ChannelID:   channelID,
 	}, &channelID)
+}
+
+// extractDestinationFromChannelID extracts the destination prefix from a channel ID
+// For example: "web:session-123" -> "web", "device:device-456" -> "device"
+func extractDestinationFromChannelID(channelID ChannelID) MessageDestination {
+	// Handle empty or malformed channel IDs
+	if channelID == "" {
+		return DestinationBroadcast
+	}
+
+	// Split by colon to get the prefix
+	parts := []rune(channelID)
+	for i, r := range parts {
+		if r == ':' {
+			// If colon is at the beginning or prefix is empty, return broadcast
+			if i == 0 {
+				return DestinationBroadcast
+			}
+			return MessageDestination(string(parts[:i]))
+		}
+	}
+	// If no colon found, assume broadcast
+	return DestinationBroadcast
 }
 
 func (c *client) SendErrorToChannel(req *RequestMessage, errResponse ErrorResponse) error {
 	return c.Send(ErrorMessage{
-		Action:    req.Action,
-		Source:    c.source,
-		ChannelID: req.ChannelID,
-		Error:     errResponse,
-		ReplyTo:   req.RequestID,
+		Action:      req.Action,
+		Source:      c.source,
+		Destination: MessageDestination(req.Source),
+		ChannelID:   req.ChannelID,
+		Error:       errResponse,
+		ReplyTo:     req.RequestID,
 	}, &req.ChannelID)
+}
+
+// RegisterWill registers a Last Will message to be sent if connection closes unexpectedly
+func (c *client) RegisterWill(will WillMessage) error {
+	if c.IsClosed() {
+		return fmt.Errorf("client connection is closed")
+	}
+
+	// Print the will message if logging is enabled
+	if c.printConfig != nil {
+		c.logger.WithField("will_action", will.Action).Debug("Registering Last Will")
+	}
+
+	// Prepare envelope for will message
+	envelope := struct {
+		Type string `json:"type"`
+		WillMessage
+	}{
+		Type:        TypeWill,
+		WillMessage: will,
+	}
+
+	// Use pooled buffer for better performance
+	buf := bufferPool.Get().(*bytes.Buffer)
+	defer func() {
+		buf.Reset()
+		bufferPool.Put(buf)
+	}()
+
+	encoder := json.NewEncoder(buf)
+	if err := encoder.Encode(envelope); err != nil {
+		c.logger.WithError(err).Error("Failed to marshal will message")
+		return fmt.Errorf("failed to marshal will message: %w", err)
+	}
+
+	// Remove the trailing newline that Encoder adds
+	data := buf.Bytes()
+	if len(data) > 0 && data[len(data)-1] == '\n' {
+		data = data[:len(data)-1]
+	}
+
+	return c.conn.SendMessage(data)
+}
+
+// ClearWill clears the Last Will message (use before graceful disconnect)
+func (c *client) ClearWill() error {
+	// Send an empty will to clear it
+	return c.RegisterWill(WillMessage{})
 }
 
 // Close safely closes the client connection.
