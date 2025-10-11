@@ -520,6 +520,36 @@ func TestClient_SendEventToChannel(t *testing.T) {
 	conn.AssertExpectations(t)
 }
 
+func TestClient_SendEventToChannel_ExtractsDestination(t *testing.T) {
+	logger := logrus.NewEntry(logrus.New())
+	conn := NewMockConnection()
+
+	config := ClientConfig{
+		Source: SystemDevice,
+	}
+	client := NewClient(logger, conn, config).(*client)
+
+	action := MessageAction("device.session.ready")
+	payload := map[string]any{"test": "value"}
+	channelID := ChannelID("web:test-session-123")
+
+	var capturedJSON map[string]any
+	conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
+		_ = json.Unmarshal(data, &capturedJSON)
+		return true
+	})).Return(nil)
+
+	err := client.SendEventToChannel(action, payload, channelID)
+	assert.NoError(t, err)
+
+	// CRITICAL: Check that destination field is extracted from channel ID
+	assert.Equal(t, "web", capturedJSON["destination"], "Destination should be 'web' when extracted from channel ID 'web:xxx'")
+	assert.NotEmpty(t, capturedJSON["destination"], "Destination field must not be empty")
+	assert.Equal(t, "web:test-session-123", capturedJSON["channel_id"], "Channel ID should be preserved")
+
+	conn.AssertExpectations(t)
+}
+
 func TestClient_Close(t *testing.T) {
 	t.Run("closes connection and channels", func(t *testing.T) {
 		logger := logrus.NewEntry(logrus.New())

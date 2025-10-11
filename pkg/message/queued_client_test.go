@@ -147,13 +147,8 @@ func TestQueuedClient_CriticalMessageNoError(t *testing.T) {
 	logger := log.WithField("test", "QueuedClient")
 	config := DefaultQueueConfig()
 	config.FlushInterval = 100 * time.Millisecond
-	// Configure to treat messages with "critical" action as critical
-	config.IsCriticalMessage = func(msg any) bool {
-		if em, ok := msg.(EventMessage); ok {
-			return em.Action == "critical.event"
-		}
-		return false
-	}
+	// Configure to treat "critical.event" as critical
+	config.CriticalMessageActions = []string{"critical.event"}
 
 	// Create QueuedClient
 	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
@@ -195,10 +190,8 @@ func TestQueuedClient_FlushOnReconnection(t *testing.T) {
 	logger := log.WithField("test", "QueuedClient")
 	config := DefaultQueueConfig()
 	config.FlushInterval = 10 * time.Millisecond // Short interval for testing
-	// Configure to treat all messages as critical
-	config.IsCriticalMessage = func(msg any) bool {
-		return true
-	}
+	// Configure to treat all test.event* as critical
+	config.CriticalMessageActions = []string{"test.event*"}
 
 	// Create QueuedClient
 	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
@@ -260,10 +253,8 @@ func TestQueuedClient_MessageExpiration(t *testing.T) {
 	config := DefaultQueueConfig()
 	config.MaxMessageAge = 1 * time.Nanosecond // Very short expiration for testing
 	config.FlushInterval = 1 * time.Hour       // Disable auto-flush
-	// Configure to treat all messages as critical
-	config.IsCriticalMessage = func(msg any) bool {
-		return true
-	}
+	// Configure to treat all test.event* as critical
+	config.CriticalMessageActions = []string{"test.event*"}
 
 	// Create QueuedClient
 	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
@@ -359,13 +350,8 @@ func TestQueuedClient_CriticalMessagePriority(t *testing.T) {
 	config := DefaultQueueConfig()
 	config.MaxQueueSize = 2
 	config.FlushInterval = 1 * time.Second
-	// Configure to treat "critical" action as critical
-	config.IsCriticalMessage = func(msg any) bool {
-		if em, ok := msg.(EventMessage); ok {
-			return em.Action == "critical.event"
-		}
-		return false
-	}
+	// Configure to treat "critical.event" as critical
+	config.CriticalMessageActions = []string{"critical.event"}
 
 	// Create QueuedClient
 	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
@@ -476,13 +462,8 @@ func TestQueuedClient_GetQueueStats(t *testing.T) {
 	mockClient := createMockClient()
 	logger := log.WithField("test", "QueuedClient")
 	config := DefaultQueueConfig()
-	// Configure to treat "critical" action as critical
-	config.IsCriticalMessage = func(msg any) bool {
-		if em, ok := msg.(EventMessage); ok {
-			return em.Action == "critical.event"
-		}
-		return false
-	}
+	// Configure to treat "critical.event" as critical
+	config.CriticalMessageActions = []string{"critical.event"}
 
 	// Create QueuedClient
 	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
@@ -539,14 +520,14 @@ func TestQueuedClient_SendEventToChannel(t *testing.T) {
 	action := MessageAction("test.action")
 	payload := map[string]any{"data": "test"}
 
-	// Setup mock to succeed
-	mockClient.On("Send", mock.Anything, &channelID).Return(nil)
+	// Setup mock for SendEventToChannel (QueuedClient delegates to underlying client)
+	mockClient.On("SendEventToChannel", action, payload, channelID).Return(nil)
 
 	// Send event
 	err := qc.SendEventToChannel(action, payload, channelID)
 
 	require.NoError(t, err)
-	mockClient.AssertCalled(t, "Send", mock.Anything, &channelID)
+	mockClient.AssertCalled(t, "SendEventToChannel", action, payload, channelID)
 }
 
 func TestQueuedClient_ConcurrentAccess(t *testing.T) {

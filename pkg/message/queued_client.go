@@ -21,14 +21,15 @@ type QueuedMessage struct {
 
 // QueueConfig configures the message queue behavior
 type QueueConfig struct {
-	MaxQueueSize       int                // Maximum number of messages to queue (default: 100)
-	MaxMessageAge      time.Duration      // Maximum age of queued messages (default: 30s)
-	MaxCriticalAge     time.Duration      // Maximum age for critical messages (default: 60s)
-	FlushInterval      time.Duration      // How often to try flushing the queue (default: 1s)
-	MaxRetries         int                // Maximum retries for normal messages (default: 3)
-	MaxCriticalRetries int                // Maximum retries for critical messages (default: 10)
-	Source             MessageSource      // Message source (default: SystemDevice)
-	IsCriticalMessage  func(msg any) bool // Optional function to determine if a message is critical
+	MaxQueueSize           int                // Maximum number of messages to queue (default: 100)
+	MaxMessageAge          time.Duration      // Maximum age of queued messages (default: 30s)
+	MaxCriticalAge         time.Duration      // Maximum age for critical messages (default: 60s)
+	FlushInterval          time.Duration      // How often to try flushing the queue (default: 1s)
+	MaxRetries             int                // Maximum retries for normal messages (default: 3)
+	MaxCriticalRetries     int                // Maximum retries for critical messages (default: 10)
+	Source                 MessageSource      // Message source (default: SystemDevice)
+	CriticalMessageActions []string           // List of message actions to treat as critical (supports prefix matching with "*")
+	IsCriticalMessage      func(msg any) bool // Optional function to determine if a message is critical (takes precedence over CriticalMessageActions)
 }
 
 // DefaultQueueConfig returns sensible defaults
@@ -266,12 +267,51 @@ func (qc *QueuedClient) queueMessage(msgType string, message any, channelID *Cha
 	}).Debug("Message queued")
 }
 
-// isCriticalMessage determines if a message is critical using the configured function
+// isCriticalMessage determines if a message is critical using the configured function or list
 func (qc *QueuedClient) isCriticalMessage(msg any) bool {
+	// Function takes precedence over list
 	if qc.config.IsCriticalMessage != nil {
 		return qc.config.IsCriticalMessage(msg)
 	}
+
+	// Check against the configured list of critical actions
+	if len(qc.config.CriticalMessageActions) > 0 {
+		var action string
+		switch m := msg.(type) {
+		case EventMessage:
+			action = string(m.Action)
+		case RequestMessage:
+			action = string(m.Action)
+		case ResponseMessage:
+			action = string(m.Action)
+		default:
+			return false
+		}
+
+		for _, pattern := range qc.config.CriticalMessageActions {
+			if matchActionPattern(action, pattern) {
+				return true
+			}
+		}
+	}
+
 	// Default: no messages are critical
+	return false
+}
+
+// matchActionPattern checks if an action matches a pattern (supports "*" for prefix matching)
+func matchActionPattern(action, pattern string) bool {
+	// Exact match
+	if action == pattern {
+		return true
+	}
+
+	// Prefix match with wildcard
+	if strings.HasSuffix(pattern, "*") {
+		prefix := strings.TrimSuffix(pattern, "*")
+		return strings.HasPrefix(action, prefix)
+	}
+
 	return false
 }
 
@@ -336,14 +376,9 @@ func (qc *QueuedClient) Send(msg any, sessionId *ChannelID) error {
 }
 
 // SendEventToChannel sends an event, queuing it if the connection is down
+// Delegates to the underlying client to ensure destination is properly extracted
 func (qc *QueuedClient) SendEventToChannel(action MessageAction, payload any, sessionID ChannelID) error {
-	msg := EventMessage{
-		Action:    action,
-		Payload:   payload,
-		Source:    qc.source,
-		ChannelID: sessionID,
-	}
-	return qc.Send(msg, &sessionID)
+	return qc.client.SendEventToChannel(action, payload, sessionID)
 }
 
 // Delegate all other methods to the underlying client
@@ -388,25 +423,13 @@ func (qc *QueuedClient) ReadMessage() <-chan any {
 }
 
 func (qc *QueuedClient) SendResponse(req *RequestMessage, payload any) error {
-	msg := ResponseMessage{
-		Action:    req.Action,
-		Payload:   payload,
-		Source:    qc.source,
-		ChannelID: req.ChannelID,
-		ReplyTo:   req.RequestID,
-	}
-	return qc.Send(msg, &req.ChannelID)
+	// Delegate to underlying client to ensure destination is properly set
+	return qc.client.SendResponse(req, payload)
 }
 
 func (qc *QueuedClient) SendErrorToChannel(req *RequestMessage, errResponse ErrorResponse) error {
-	msg := ErrorMessage{
-		Action:    req.Action,
-		Source:    qc.source,
-		ChannelID: req.ChannelID,
-		Error:     errResponse,
-		ReplyTo:   req.RequestID,
-	}
-	return qc.Send(msg, &req.ChannelID)
+	// Delegate to underlying client to ensure destination is properly set
+	return qc.client.SendErrorToChannel(req, errResponse)
 }
 
 // GetQueueSize returns the current number of queued messages (for monitoring)
