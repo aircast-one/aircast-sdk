@@ -37,12 +37,12 @@ func TestRequestBuilder(t *testing.T) {
 
 	t.Run("BuildsMinimalRequest", func(t *testing.T) {
 		req := NewRequest("test.action").
-			WithSource(SystemClient).
+			WithSource(SystemWeb).
 			WithDestination(DestinationDevice).
 			Build()
 
 		assert.Equal(t, "test.action", req.Action)
-		assert.Equal(t, SystemClient, req.Source)
+		assert.Equal(t, SystemWeb, req.Source)
 		assert.Equal(t, MessageSource(DestinationDevice), req.Destination)
 		assert.NotEmpty(t, req.RequestID)
 	})
@@ -161,7 +161,7 @@ func TestMapBuilder(t *testing.T) {
 	t.Run("BuildsCompleteMapMessage", func(t *testing.T) {
 		msg := NewMapMessage(TypeRequest, "test.action").
 			WithRequestID("req-123").
-			WithSource(SystemClient).
+			WithSource(SystemWeb).
 			WithDestination(DestinationAPI).
 			WithPayload(map[string]any{"key": "value"}).
 			WithChannelID("channel-1").
@@ -172,7 +172,7 @@ func TestMapBuilder(t *testing.T) {
 		assert.Equal(t, "request", msg["type"])
 		assert.Equal(t, "test.action", msg["action"])
 		assert.Equal(t, "req-123", msg["request_id"])
-		assert.Equal(t, SystemClient, msg["source"])
+		assert.Equal(t, SystemWeb, msg["source"])
 		assert.Equal(t, DestinationAPI, msg["destination"])
 		assert.Equal(t, "channel-1", msg["channel_id"])
 		assert.Equal(t, int64(1234567890), msg["timestamp"])
@@ -214,114 +214,6 @@ func TestMapBuilder(t *testing.T) {
 
 		assert.Equal(t, "custom_value", msg["custom_field"])
 		assert.Equal(t, 42, msg["another_field"])
-	})
-}
-
-func TestConvenienceFunctions(t *testing.T) {
-	t.Run("NewSFUPublisherOffer", func(t *testing.T) {
-		req := NewSFUPublisherOffer("req-123", "sdp-content")
-
-		assert.Equal(t, "api.sfu.publisher.offer", req.Action)
-		assert.Equal(t, "req-123", req.RequestID)
-		assert.Equal(t, SystemDevice, req.Source)
-		assert.Equal(t, MessageSource(DestinationAPI), req.Destination)
-
-		payload, ok := req.Payload.(map[string]any)
-		require.True(t, ok)
-		assert.Equal(t, "sdp-content", payload["sdp"])
-	})
-
-	t.Run("NewSFUSubscriberOffer", func(t *testing.T) {
-		req := NewSFUSubscriberOffer("req-456", "sdp-content")
-
-		assert.Equal(t, "api.sfu.subscriber.offer", req.Action)
-		assert.Equal(t, "req-456", req.RequestID)
-		assert.Equal(t, SystemClient, req.Source)
-		assert.Equal(t, MessageSource(DestinationAPI), req.Destination)
-
-		payload, ok := req.Payload.(map[string]any)
-		require.True(t, ok)
-		assert.Equal(t, "sdp-content", payload["sdp"])
-	})
-
-	t.Run("NewSFUPublisherICE", func(t *testing.T) {
-		req := NewSFUPublisherICE("req-789", "candidate-string", "0", 0)
-
-		assert.Equal(t, "api.sfu.publisher.ice", req.Action)
-		assert.Equal(t, SystemDevice, req.Source)
-		assert.Equal(t, MessageSource(DestinationAPI), req.Destination)
-
-		payload, ok := req.Payload.(map[string]any)
-		require.True(t, ok)
-		assert.Equal(t, "candidate-string", payload["candidate"])
-		assert.Equal(t, "0", payload["sdpMid"])
-		assert.Equal(t, 0, payload["sdpMLineIndex"])
-	})
-
-	t.Run("NewSFUSubscriberICE", func(t *testing.T) {
-		req := NewSFUSubscriberICE("req-101", "candidate-string", "1", 1)
-
-		assert.Equal(t, "api.sfu.subscriber.ice", req.Action)
-		assert.Equal(t, SystemClient, req.Source)
-		assert.Equal(t, MessageSource(DestinationAPI), req.Destination)
-
-		payload, ok := req.Payload.(map[string]any)
-		require.True(t, ok)
-		assert.Equal(t, "candidate-string", payload["candidate"])
-		assert.Equal(t, "1", payload["sdpMid"])
-		assert.Equal(t, 1, payload["sdpMLineIndex"])
-	})
-
-	t.Run("NewDeviceSessionReady", func(t *testing.T) {
-		payload := map[string]any{"ready": true}
-		event := NewDeviceSessionReady(payload)
-
-		assert.Equal(t, "device.session.ready", event.Action)
-		assert.Equal(t, SystemDevice, event.Source)
-		assert.Equal(t, DestinationWeb, event.Destination)
-		assert.Equal(t, payload, event.Payload)
-	})
-
-	t.Run("NewConnectionActiveEvent", func(t *testing.T) {
-		event := NewConnectionActiveEvent(SystemDevice, DestinationWeb)
-
-		assert.Equal(t, "device.connection.active", event.Action)
-		assert.Equal(t, SystemDevice, event.Source)
-		assert.Equal(t, DestinationWeb, event.Destination)
-	})
-
-	t.Run("NewConnectionInactiveEvent", func(t *testing.T) {
-		event := NewConnectionInactiveEvent(SystemClient, DestinationDevice)
-
-		assert.Equal(t, "client.connection.inactive", event.Action)
-		assert.Equal(t, SystemClient, event.Source)
-		assert.Equal(t, DestinationDevice, event.Destination)
-	})
-
-	t.Run("NewTimestampedMapRequest", func(t *testing.T) {
-		payload := map[string]any{"data": "value"}
-		msg := NewTimestampedMapRequest("test.action", "req-123", SystemClient, DestinationDevice, payload)
-
-		assert.Equal(t, "request", msg["type"])
-		assert.Equal(t, "test.action", msg["action"])
-		assert.Equal(t, "req-123", msg["request_id"])
-		assert.Equal(t, SystemClient, msg["source"])
-		assert.Equal(t, DestinationDevice, msg["destination"])
-		assert.NotNil(t, msg["timestamp"])
-		assert.Equal(t, payload, msg["payload"])
-	})
-
-	t.Run("NewTimestampedMapResponse", func(t *testing.T) {
-		payload := map[string]any{"result": "ok"}
-		msg := NewTimestampedMapResponse("test.action", "req-123", SystemAPI, DestinationWeb, payload)
-
-		assert.Equal(t, "response", msg["type"])
-		assert.Equal(t, "test.action", msg["action"])
-		assert.Equal(t, "req-123", msg["reply_to"])
-		assert.Equal(t, SystemAPI, msg["source"])
-		assert.Equal(t, DestinationWeb, msg["destination"])
-		assert.NotNil(t, msg["timestamp"])
-		assert.Equal(t, payload, msg["payload"])
 	})
 }
 
@@ -370,7 +262,7 @@ func TestBuilderChaining(t *testing.T) {
 		builder := NewMapMessage(TypeRequest, "test.action")
 		assert.Equal(t, builder, builder.WithRequestID("123"))
 		assert.Equal(t, builder, builder.WithReplyTo("456"))
-		assert.Equal(t, builder, builder.WithSource(SystemClient))
+		assert.Equal(t, builder, builder.WithSource(SystemWeb))
 		assert.Equal(t, builder, builder.WithDestination(DestinationAPI))
 		assert.Equal(t, builder, builder.WithPayload(nil))
 		assert.Equal(t, builder, builder.WithChannelID("ch-1"))

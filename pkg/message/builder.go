@@ -1,8 +1,6 @@
 package message
 
 import (
-	"time"
-
 	"github.com/google/uuid"
 )
 
@@ -317,107 +315,4 @@ func (b *MapBuilder) WithField(key string, value any) *MapBuilder {
 // Build returns the constructed message map
 func (b *MapBuilder) Build() map[string]any {
 	return b.msg
-}
-
-// Convenience functions for common message patterns
-
-// NewSFUPublisherOffer creates a publisher offer request
-func NewSFUPublisherOffer(requestID string, sdp string) RequestMessage {
-	return NewRequest("api.sfu.publisher.offer").
-		WithRequestID(requestID).
-		WithSource(SystemDevice).
-		WithDestination(DestinationAPI).
-		WithPayload(map[string]any{
-			"sdp": sdp,
-		}).
-		Build()
-}
-
-// NewSFUSubscriberOffer creates a subscriber offer request
-func NewSFUSubscriberOffer(requestID string, sdp string) RequestMessage {
-	return NewRequest("api.sfu.subscriber.offer").
-		WithRequestID(requestID).
-		WithSource(SystemClient).
-		WithDestination(DestinationAPI).
-		WithPayload(map[string]any{
-			"sdp": sdp,
-		}).
-		Build()
-}
-
-// NewSFUPublisherICE creates a publisher ICE candidate request
-func NewSFUPublisherICE(requestID string, candidate string, sdpMid string, sdpMLineIndex int) RequestMessage {
-	return NewRequest("api.sfu.publisher.ice").
-		WithRequestID(requestID).
-		WithSource(SystemDevice).
-		WithDestination(DestinationAPI).
-		WithPayload(map[string]any{
-			"candidate":     candidate,
-			"sdpMid":        sdpMid,
-			"sdpMLineIndex": sdpMLineIndex,
-		}).
-		Build()
-}
-
-// NewSFUSubscriberICE creates a subscriber ICE candidate request
-func NewSFUSubscriberICE(requestID string, candidate string, sdpMid string, sdpMLineIndex int) RequestMessage {
-	return NewRequest("api.sfu.subscriber.ice").
-		WithRequestID(requestID).
-		WithSource(SystemClient).
-		WithDestination(DestinationAPI).
-		WithPayload(map[string]any{
-			"candidate":     candidate,
-			"sdpMid":        sdpMid,
-			"sdpMLineIndex": sdpMLineIndex,
-		}).
-		Build()
-}
-
-// NewDeviceSessionReady creates a device session ready event
-func NewDeviceSessionReady(payload any) EventMessage {
-	return NewEvent("device.session.ready").
-		WithSource(SystemDevice).
-		WithDestination(DestinationWeb).
-		WithPayload(payload).
-		Build()
-}
-
-// NewConnectionActiveEvent creates a connection active event
-func NewConnectionActiveEvent(source MessageSource, destination MessageDestination) EventMessage {
-	action := string(source) + ".connection.active"
-	return NewEvent(MessageAction(action)).
-		WithSource(source).
-		WithDestination(destination).
-		Build()
-}
-
-// NewConnectionInactiveEvent creates a connection inactive event
-func NewConnectionInactiveEvent(source MessageSource, destination MessageDestination) EventMessage {
-	action := string(source) + ".connection.inactive"
-	return NewEvent(MessageAction(action)).
-		WithSource(source).
-		WithDestination(destination).
-		Build()
-}
-
-// NewTimestampedMapRequest creates a map request with timestamp
-func NewTimestampedMapRequest(action MessageAction, requestID string, source MessageSource, destination MessageDestination, payload any) map[string]any {
-	return NewMapMessage(TypeRequest, action).
-		WithRequestID(requestID).
-		WithSource(source).
-		WithDestination(destination).
-		WithTimestamp(time.Now().UnixMilli()).
-		WithPayload(payload).
-		Build()
-}
-
-// NewTimestampedMapResponse creates a map response with timestamp
-func NewTimestampedMapResponse(action MessageAction, replyTo string, source MessageSource, destination MessageDestination, payload any) map[string]any {
-	return NewMapMessage(TypeResponse, action).
-		WithReplyTo(replyTo).
-		WithSource(source).
-		WithDestination(destination).
-		WithTimestamp(time.Now().UnixMilli()).
-		WithPayload(payload).
-		Build()
 }
