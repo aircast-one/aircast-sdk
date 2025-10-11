@@ -82,7 +82,8 @@ clean:
 
 # Display current version
 version:
-	@echo $(VERSION)
+	@echo "Tag version: $(VERSION)"
+	@echo "Build version: $(BUILD_VERSION)"
 
 # Create a patch version (e.g., v1.0.0 -> v1.0.1)
 version.patch:
