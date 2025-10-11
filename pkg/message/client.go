@@ -133,20 +133,17 @@ func (c *client) Listen(ctx context.Context) error {
 				continue
 			}
 
-			// Forward the message if not closed.
-			if !c.IsClosed() {
-				select {
-				case c.msgCh <- msg:
-					// Only log trace if enabled to reduce overhead
-					if c.logger.Logger.IsLevelEnabled(log.TraceLevel) {
-						c.logger.Trace("Message received and forwarded")
-					}
-					if c.printConfig != nil {
-						Print(msg, c.printConfig)
-					}
-				default:
-					c.logger.Warn("GenericMessage channel full, dropping message")
+			// Forward the message using safe send (prevents race on channel close)
+			if c.safeSend(msg) {
+				// Only log trace if enabled to reduce overhead
+				if c.logger.Logger.IsLevelEnabled(log.TraceLevel) {
+					c.logger.Trace("Message received and forwarded")
 				}
+				if c.printConfig != nil {
+					Print(msg, c.printConfig)
+				}
+			} else if !c.IsClosed() {
+				c.logger.Warn("GenericMessage channel full, dropping message")
 			}
 
 		case <-ctx.Done():
@@ -162,6 +159,25 @@ func (c *client) Listen(ctx context.Context) error {
 // ReadMessage returns a channel of incoming messages.
 func (c *client) ReadMessage() <-chan GenericMessage {
 	return c.msgCh
+}
+
+// safeSend safely sends a message to msgCh with proper synchronization
+// Returns true if message was sent, false if client is closed or channel is full
+func (c *client) safeSend(msg GenericMessage) bool {
+	c.closeMutex.Lock()
+	defer c.closeMutex.Unlock()
+
+	if c.closed {
+		return false
+	}
+
+	select {
+	case c.msgCh <- msg:
+		return true
+	default:
+		// Channel full
+		return false
+	}
 }
 
 // Send is a helper function that handles the common logic for sending messages
@@ -219,6 +235,15 @@ func (c *client) Send(msg any, channelId *ChannelID) error {
 			ErrorMessage: m,
 		}
 	case EventMessage:
+		// DEBUG: Log EventMessage before marshaling
+		c.logger.WithFields(log.Fields{
+			"action":      m.Action,
+			"destination": m.Destination,
+			"dest_len":    len(m.Destination),
+			"channel_id":  m.ChannelID,
+			"source":      m.Source,
+		}).Debug("[SDK] Marshaling EventMessage")
+
 		envelope = struct {
 			Type string `json:"type"`
 			EventMessage
@@ -275,6 +300,15 @@ func (c *client) SendResponse(req *RequestMessage, payload any) error {
 func (c *client) SendEventToChannel(action MessageAction, payload any, channelID ChannelID) error {
 	// Extract destination from channel ID (e.g., "web:xxx" -> "web")
 	destination := extractDestinationFromChannelID(channelID)
+
+	// DEBUG: Log what we extracted
+	c.logger.WithFields(log.Fields{
+		"action":         action,
+		"channel_id":     channelID,
+		"extracted_dest": destination,
+		"dest_length":    len(destination),
+		"dest_is_empty":  destination == "",
+	}).Debug("[SDK] SendEventToChannel - extracted destination")
 
 	return c.Send(EventMessage{
 		Action:      action,

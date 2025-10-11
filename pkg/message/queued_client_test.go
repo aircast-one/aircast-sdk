@@ -147,6 +147,13 @@ func TestQueuedClient_CriticalMessageNoError(t *testing.T) {
 	logger := log.WithField("test", "QueuedClient")
 	config := DefaultQueueConfig()
 	config.FlushInterval = 100 * time.Millisecond
+	// Configure to treat messages with "critical" action as critical
+	config.IsCriticalMessage = func(msg any) bool {
+		if em, ok := msg.(EventMessage); ok {
+			return em.Action == "critical.event"
+		}
+		return false
+	}
 
 	// Create QueuedClient
 	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
@@ -162,10 +169,10 @@ func TestQueuedClient_CriticalMessageNoError(t *testing.T) {
 	channelID := ChannelID("test-channel")
 	mockClient.On("Send", mock.Anything, &channelID).Return(connectionError)
 
-	// Send a critical WebRTC message while disconnected
+	// Send a critical message while disconnected
 	msg := EventMessage{
-		Action:    "webrtc.session.ice",
-		Payload:   map[string]any{"candidate": "test"},
+		Action:    "critical.event",
+		Payload:   map[string]any{"data": "test"},
 		Source:    SystemDevice,
 		ChannelID: channelID,
 	}
@@ -188,6 +195,10 @@ func TestQueuedClient_FlushOnReconnection(t *testing.T) {
 	logger := log.WithField("test", "QueuedClient")
 	config := DefaultQueueConfig()
 	config.FlushInterval = 10 * time.Millisecond // Short interval for testing
+	// Configure to treat all messages as critical
+	config.IsCriticalMessage = func(msg any) bool {
+		return true
+	}
 
 	// Create QueuedClient
 	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
@@ -249,6 +260,10 @@ func TestQueuedClient_MessageExpiration(t *testing.T) {
 	config := DefaultQueueConfig()
 	config.MaxMessageAge = 1 * time.Nanosecond // Very short expiration for testing
 	config.FlushInterval = 1 * time.Hour       // Disable auto-flush
+	// Configure to treat all messages as critical
+	config.IsCriticalMessage = func(msg any) bool {
+		return true
+	}
 
 	// Create QueuedClient
 	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
@@ -344,6 +359,13 @@ func TestQueuedClient_CriticalMessagePriority(t *testing.T) {
 	config := DefaultQueueConfig()
 	config.MaxQueueSize = 2
 	config.FlushInterval = 1 * time.Second
+	// Configure to treat "critical" action as critical
+	config.IsCriticalMessage = func(msg any) bool {
+		if em, ok := msg.(EventMessage); ok {
+			return em.Action == "critical.event"
+		}
+		return false
+	}
 
 	// Create QueuedClient
 	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
@@ -369,7 +391,7 @@ func TestQueuedClient_CriticalMessagePriority(t *testing.T) {
 
 	// Send critical message
 	criticalMsg := EventMessage{
-		Action:    "webrtc.session.ice",
+		Action:    "critical.event",
 		Payload:   map[string]any{"type": "critical"},
 		Source:    SystemDevice,
 		ChannelID: channelID,
@@ -454,6 +476,13 @@ func TestQueuedClient_GetQueueStats(t *testing.T) {
 	mockClient := createMockClient()
 	logger := log.WithField("test", "QueuedClient")
 	config := DefaultQueueConfig()
+	// Configure to treat "critical" action as critical
+	config.IsCriticalMessage = func(msg any) bool {
+		if em, ok := msg.(EventMessage); ok {
+			return em.Action == "critical.event"
+		}
+		return false
+	}
 
 	// Create QueuedClient
 	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
@@ -478,7 +507,7 @@ func TestQueuedClient_GetQueueStats(t *testing.T) {
 	_ = qc.Send(normalMsg, &channelID)
 
 	criticalMsg := EventMessage{
-		Action:    "webrtc.session.offer",
+		Action:    "critical.event",
 		Payload:   map[string]any{"type": "critical"},
 		Source:    SystemDevice,
 		ChannelID: channelID,

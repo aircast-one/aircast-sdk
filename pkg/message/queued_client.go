@@ -21,13 +21,14 @@ type QueuedMessage struct {
 
 // QueueConfig configures the message queue behavior
 type QueueConfig struct {
-	MaxQueueSize       int           // Maximum number of messages to queue (default: 100)
-	MaxMessageAge      time.Duration // Maximum age of queued messages (default: 30s)
-	MaxCriticalAge     time.Duration // Maximum age for critical messages (default: 60s)
-	FlushInterval      time.Duration // How often to try flushing the queue (default: 1s)
-	MaxRetries         int           // Maximum retries for normal messages (default: 3)
-	MaxCriticalRetries int           // Maximum retries for critical messages (default: 10)
-	Source             MessageSource // Message source (default: SystemDevice)
+	MaxQueueSize       int                // Maximum number of messages to queue (default: 100)
+	MaxMessageAge      time.Duration      // Maximum age of queued messages (default: 30s)
+	MaxCriticalAge     time.Duration      // Maximum age for critical messages (default: 60s)
+	FlushInterval      time.Duration      // How often to try flushing the queue (default: 1s)
+	MaxRetries         int                // Maximum retries for normal messages (default: 3)
+	MaxCriticalRetries int                // Maximum retries for critical messages (default: 10)
+	Source             MessageSource      // Message source (default: SystemDevice)
+	IsCriticalMessage  func(msg any) bool // Optional function to determine if a message is critical
 }
 
 // DefaultQueueConfig returns sensible defaults
@@ -265,20 +266,12 @@ func (qc *QueuedClient) queueMessage(msgType string, message any, channelID *Cha
 	}).Debug("Message queued")
 }
 
-// isCriticalMessage determines if a message is critical (e.g., WebRTC signaling)
-func isCriticalMessage(msg any) bool {
-	// Check for WebRTC-related messages
-	switch m := msg.(type) {
-	case EventMessage:
-		action := string(m.Action)
-		return strings.HasPrefix(action, "webrtc.session")
-	case RequestMessage:
-		action := string(m.Action)
-		return strings.HasPrefix(action, "webrtc.session")
-	case ResponseMessage:
-		action := string(m.Action)
-		return strings.HasPrefix(action, "webrtc.session")
+// isCriticalMessage determines if a message is critical using the configured function
+func (qc *QueuedClient) isCriticalMessage(msg any) bool {
+	if qc.config.IsCriticalMessage != nil {
+		return qc.config.IsCriticalMessage(msg)
 	}
+	// Default: no messages are critical
 	return false
 }
 
@@ -325,7 +318,7 @@ func (qc *QueuedClient) Send(msg any, sessionId *ChannelID) error {
 			}
 
 			// Queue the message
-			critical := isCriticalMessage(msg)
+			critical := qc.isCriticalMessage(msg)
 			qc.queueMessage(msgType, msg, sessionId, critical)
 
 			// Return nil for critical messages to prevent upstream errors
