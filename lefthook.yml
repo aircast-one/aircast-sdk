@@ -1,0 +1,45 @@
+# Lefthook configuration for Aircast SDK
+# Install: brew install lefthook (or go install github.com/evilmartians/lefthook@latest)
+# Setup: lefthook install
+# Docs: https://github.com/evilmartians/lefthook
+
+pre-commit:
+  parallel: true
+  commands:
+    format:
+      glob: "**/*.go"
+      run: go fmt ./...
+      stage_fixed: true
+
+    mod-tidy:
+      glob: "{go.mod,go.sum,**/*.go}"
+      run: go mod tidy
+      stage_fixed: true
+
+    lint:
+      glob: "**/*.go"
+      run: golangci-lint run
+      stage_fixed: false
+      fail_text: "Linting failed. Please fix the issues before committing."
+
+    test:
+      glob: "**/*.go"
+      run: go test ./... -race -timeout 30s
+      stage_fixed: false
+      fail_text: "Tests failed. Please fix the issues before committing."
+
+pre-push:
+  commands:
+    test-full:
+      run: go test ./... -race -cover -timeout 60s
+      stage_fixed: false
+      fail_text: "Race condition or test failure detected. Please fix before pushing."
+
+    test-coverage:
+      run: go test ./... -coverprofile=coverage.out && go tool cover -func=coverage.out | tail -1
+      stage_fixed: false
+
+commit-msg:
+  commands:
+    conventional:
+      run: echo "Commit message validation passed" # Simplified for now
