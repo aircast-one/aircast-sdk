@@ -679,3 +679,86 @@ func BenchmarkQueuedClient_QueueAndFlush(b *testing.B) {
 	qc.flushQueue()
 	b.StopTimer()
 }
+
+func TestQueuedClient_DelegationMethods(t *testing.T) {
+	mockClient := createMockClient()
+	logger := log.WithField("test", "QueuedClient")
+	config := DefaultQueueConfig()
+	qc := NewQueuedClient(mockClient, logger, &config)
+
+	t.Run("Listen delegation", func(t *testing.T) {
+		ctx := context.Background()
+		mockClient.On("Listen", ctx).Return(nil).Once()
+		err := qc.Listen(ctx)
+		assert.NoError(t, err)
+		mockClient.AssertCalled(t, "Listen", ctx)
+	})
+
+	t.Run("SendMessageToChannel uses Send internally", func(t *testing.T) {
+		channelID := ChannelID("test-channel")
+		msg := EventMessage{Action: "test.event"}
+		// SendMessageToChannel calls qc.Send which calls client.Send
+		mockClient.On("Send", msg, &channelID).Return(nil).Once()
+		err := qc.SendMessageToChannel(channelID, msg)
+		assert.NoError(t, err)
+		mockClient.AssertCalled(t, "Send", msg, &channelID)
+	})
+
+	t.Run("SendBroadcastMessage uses Send internally", func(t *testing.T) {
+		msg := EventMessage{Action: "test.event"}
+		// SendBroadcastMessage calls qc.Send with nil channelID
+		var nilChannelID *ChannelID
+		mockClient.On("Send", msg, nilChannelID).Return(nil).Once()
+		err := qc.SendBroadcastMessage(msg)
+		assert.NoError(t, err)
+		mockClient.AssertCalled(t, "Send", msg, nilChannelID)
+	})
+
+	t.Run("IsClosed delegation", func(t *testing.T) {
+		mockClient.SetClosed(true)
+		assert.True(t, qc.IsClosed())
+		mockClient.SetClosed(false)
+		assert.False(t, qc.IsClosed())
+	})
+
+	t.Run("ReadMessage delegation", func(t *testing.T) {
+		msgCh := make(chan any)
+		mockClient.On("ReadMessage").Return(msgCh).Once()
+		result := qc.ReadMessage()
+		assert.NotNil(t, result, "ReadMessage should return a channel")
+		mockClient.AssertCalled(t, "ReadMessage")
+	})
+
+	t.Run("SendResponse delegation", func(t *testing.T) {
+		req := &RequestMessage{Action: "test.action", RequestID: "req-123"}
+		payload := map[string]any{"result": "success"}
+		mockClient.On("SendResponse", req, payload).Return(nil).Once()
+		err := qc.SendResponse(req, payload)
+		assert.NoError(t, err)
+		mockClient.AssertCalled(t, "SendResponse", req, payload)
+	})
+
+	t.Run("SendErrorToChannel delegation", func(t *testing.T) {
+		req := &RequestMessage{Action: "test.action", RequestID: "req-123"}
+		errResp := ErrorResponse{Code: "ERROR", Message: "test error"}
+		mockClient.On("SendErrorToChannel", req, errResp).Return(nil).Once()
+		err := qc.SendErrorToChannel(req, errResp)
+		assert.NoError(t, err)
+		mockClient.AssertCalled(t, "SendErrorToChannel", req, errResp)
+	})
+
+	t.Run("RegisterWill delegation", func(t *testing.T) {
+		will := WillMessage{Action: "device.disconnect", Payload: map[string]any{"reason": "timeout"}}
+		mockClient.On("RegisterWill", will).Return(nil).Once()
+		err := qc.RegisterWill(will)
+		assert.NoError(t, err)
+		mockClient.AssertCalled(t, "RegisterWill", will)
+	})
+
+	t.Run("ClearWill delegation", func(t *testing.T) {
+		mockClient.On("ClearWill").Return(nil).Once()
+		err := qc.ClearWill()
+		assert.NoError(t, err)
+		mockClient.AssertCalled(t, "ClearWill")
+	})
+}

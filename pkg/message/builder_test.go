@@ -215,6 +215,20 @@ func TestMapBuilder(t *testing.T) {
 		assert.Equal(t, "custom_value", msg["custom_field"])
 		assert.Equal(t, 42, msg["another_field"])
 	})
+
+	t.Run("BuildsWithRetainedFlag", func(t *testing.T) {
+		msg := NewMapMessage(TypeEvent, "telemetry.battery").
+			WithSource(SystemDevice).
+			WithDestination(DestinationWeb).
+			WithRetained(true).
+			WithPayload(map[string]any{"level": 85}).
+			Build()
+
+		assert.Equal(t, "event", msg["type"])
+		assert.Equal(t, "telemetry.battery", msg["action"])
+		assert.Equal(t, true, msg["retained"])
+		assert.Equal(t, SystemDevice, msg["source"])
+	})
 }
 
 func TestBuilderChaining(t *testing.T) {

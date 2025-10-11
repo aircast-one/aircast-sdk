@@ -646,3 +646,158 @@ func TestClient_ReadMessage(t *testing.T) {
 		// Expected
 	}
 }
+
+func TestClient_RegisterWill(t *testing.T) {
+	t.Run("registers will message successfully", func(t *testing.T) {
+		logger := logrus.NewEntry(logrus.New())
+		conn := NewMockConnection()
+
+		config := ClientConfig{
+			Source: SystemDevice,
+		}
+		client := NewClient(logger, conn, config)
+
+		will := WillMessage{
+			Action:      "device.status",
+			Payload:     map[string]any{"status": "offline", "reason": "connection_lost"},
+			Destination: DestinationBroadcast,
+		}
+
+		conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
+			var envelope map[string]any
+			_ = json.Unmarshal(data, &envelope)
+			return envelope["type"] == TypeWill && envelope["action"] == "device.status"
+		})).Return(nil)
+
+		err := client.RegisterWill(will)
+		assert.NoError(t, err)
+		conn.AssertExpectations(t)
+	})
+
+	t.Run("returns error when client is closed", func(t *testing.T) {
+		logger := logrus.NewEntry(logrus.New())
+		conn := NewMockConnection()
+		conn.On("Close").Return(nil)
+
+		config := ClientConfig{
+			Source: SystemDevice,
+		}
+		client := NewClient(logger, conn, config)
+		_ = client.Close()
+
+		will := WillMessage{
+			Action:      "device.status",
+			Destination: DestinationBroadcast,
+		}
+
+		err := client.RegisterWill(will)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "closed")
+	})
+}
+
+func TestClient_ClearWill(t *testing.T) {
+	logger := logrus.NewEntry(logrus.New())
+	conn := NewMockConnection()
+
+	config := ClientConfig{
+		Source: SystemDevice,
+	}
+	client := NewClient(logger, conn, config)
+
+	// Expect an empty will message to be sent
+	conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
+		var envelope map[string]any
+		_ = json.Unmarshal(data, &envelope)
+		return envelope["type"] == TypeWill && envelope["action"] == ""
+	})).Return(nil)
+
+	err := client.ClearWill()
+	assert.NoError(t, err)
+	conn.AssertExpectations(t)
+}
+
+func TestClient_SourceToDestination(t *testing.T) {
+	logger := logrus.NewEntry(logrus.New())
+	conn := NewMockConnection()
+
+	config := ClientConfig{
+		Source: SystemAPI,
+	}
+	client := NewClient(logger, conn, config).(*client)
+
+	t.Run("maps web source correctly", func(t *testing.T) {
+		req := &RequestMessage{
+			Action:    "test",
+			Source:    SystemWeb,
+			RequestID: "req-1",
+			ChannelID: "ch-1",
+		}
+
+		conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
+			var envelope map[string]any
+			_ = json.Unmarshal(data, &envelope)
+			return envelope["destination"] == DestinationWeb
+		})).Return(nil).Once()
+
+		err := client.SendResponse(req, map[string]string{"result": "ok"})
+		assert.NoError(t, err)
+	})
+
+	t.Run("maps device source correctly", func(t *testing.T) {
+		req := &RequestMessage{
+			Action:    "test",
+			Source:    SystemDevice,
+			RequestID: "req-2",
+			ChannelID: "ch-2",
+		}
+
+		conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
+			var envelope map[string]any
+			_ = json.Unmarshal(data, &envelope)
+			return envelope["destination"] == DestinationDevice
+		})).Return(nil).Once()
+
+		err := client.SendResponse(req, map[string]string{"result": "ok"})
+		assert.NoError(t, err)
+	})
+
+	t.Run("maps api source correctly", func(t *testing.T) {
+		req := &RequestMessage{
+			Action:    "test",
+			Source:    SystemAPI,
+			RequestID: "req-3",
+			ChannelID: "ch-3",
+		}
+
+		conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
+			var envelope map[string]any
+			_ = json.Unmarshal(data, &envelope)
+			return envelope["destination"] == DestinationAPI
+		})).Return(nil).Once()
+
+		err := client.SendResponse(req, map[string]string{"result": "ok"})
+		assert.NoError(t, err)
+	})
+
+	t.Run("handles unknown source", func(t *testing.T) {
+		req := &RequestMessage{
+			Action:    "test",
+			Source:    MessageSource("unknown"),
+			RequestID: "req-4",
+			ChannelID: "ch-4",
+		}
+
+		conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
+			var envelope map[string]any
+			_ = json.Unmarshal(data, &envelope)
+			// Unknown sources are passed through as-is
+			return envelope["destination"] == "unknown"
+		})).Return(nil).Once()
+
+		err := client.SendResponse(req, map[string]string{"result": "ok"})
+		assert.NoError(t, err)
+	})
+
+	conn.AssertExpectations(t)
+}
