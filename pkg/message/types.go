@@ -28,7 +28,7 @@ const (
 const (
 	SystemDevice MessageSource = "device"
 	SystemAPI    MessageSource = "api"
-	SystemClient MessageSource = "client"
+	SystemWeb    MessageSource = "web"
 )
 
 // Message routing destinations

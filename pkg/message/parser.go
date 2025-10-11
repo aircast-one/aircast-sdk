@@ -56,6 +56,10 @@ func UnmarshalMessage(data []byte) (any, error) {
 		if err := json.Unmarshal(data, &req); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal to RequestMessage: %w", err)
 		}
+		// Normalize legacy "client" source to "web"
+		if req.Source == "client" {
+			req.Source = SystemWeb
+		}
 		return req, nil
 	case TypeResponse:
 		if genericMsg["reply_to"] == nil {

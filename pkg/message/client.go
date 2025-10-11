@@ -286,12 +286,27 @@ func (c *client) SendBroadcastMessage(msg any) error {
 	return c.Send(msg, nil)
 }
 
+// sourceToDestination converts a MessageSource to the correct MessageDestination
+func sourceToDestination(source MessageSource) MessageDestination {
+	switch source {
+	case SystemWeb:
+		return DestinationWeb
+	case SystemDevice:
+		return DestinationDevice
+	case SystemAPI:
+		return DestinationAPI
+	default:
+		// For unknown sources, return as-is (will be validated by router)
+		return MessageDestination(source)
+	}
+}
+
 func (c *client) SendResponse(req *RequestMessage, payload any) error {
 	return c.Send(ResponseMessage{
 		Action:      req.Action,
 		Payload:     payload,
 		Source:      c.source,
-		Destination: MessageDestination(req.Source),
+		Destination: sourceToDestination(req.Source),
 		ChannelID:   req.ChannelID,
 		ReplyTo:     req.RequestID,
 	}, &req.ChannelID)
@@ -346,7 +361,7 @@ func (c *client) SendErrorToChannel(req *RequestMessage, errResponse ErrorRespon
 	return c.Send(ErrorMessage{
 		Action:      req.Action,
 		Source:      c.source,
-		Destination: MessageDestination(req.Source),
+		Destination: sourceToDestination(req.Source),
 		ChannelID:   req.ChannelID,
 		Error:       errResponse,
 		ReplyTo:     req.RequestID,
