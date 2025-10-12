@@ -504,6 +504,7 @@ func TestClient_SendEventToChannel(t *testing.T) {
 
 	action := MessageAction("device_connected")
 	payload := map[string]string{"device_id": "device-123"}
+	destination := DestinationWeb
 	sessionID := ChannelID("session-123")
 
 	conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
@@ -512,15 +513,16 @@ func TestClient_SendEventToChannel(t *testing.T) {
 		return envelope["type"] == TypeEvent &&
 			envelope["action"] == "device_connected" &&
 			envelope["source"] == SystemDevice &&
+			envelope["destination"] == DestinationWeb &&
 			envelope["channel_id"] == "session-123"
 	})).Return(nil)
 
-	err := client.SendEventToChannel(action, payload, sessionID)
+	err := client.SendEventToChannel(action, payload, destination, sessionID)
 	assert.NoError(t, err)
 	conn.AssertExpectations(t)
 }
 
-func TestClient_SendEventToChannel_ExtractsDestination(t *testing.T) {
+func TestClient_SendEventToChannel_WithDestination(t *testing.T) {
 	logger := logrus.NewEntry(logrus.New())
 	conn := NewMockConnection()
 
@@ -531,6 +533,7 @@ func TestClient_SendEventToChannel_ExtractsDestination(t *testing.T) {
 
 	action := MessageAction("device.session.ready")
 	payload := map[string]any{"test": "value"}
+	destination := DestinationWeb
 	channelID := ChannelID("web:test-session-123")
 
 	var capturedJSON map[string]any
@@ -539,11 +542,11 @@ func TestClient_SendEventToChannel_ExtractsDestination(t *testing.T) {
 		return true
 	})).Return(nil)
 
-	err := client.SendEventToChannel(action, payload, channelID)
+	err := client.SendEventToChannel(action, payload, destination, channelID)
 	assert.NoError(t, err)
 
-	// CRITICAL: Check that destination field is extracted from channel ID
-	assert.Equal(t, "web", capturedJSON["destination"], "Destination should be 'web' when extracted from channel ID 'web:xxx'")
+	// Check that destination field is set from the parameter
+	assert.Equal(t, string(DestinationWeb), capturedJSON["destination"], "Destination should be set from parameter")
 	assert.NotEmpty(t, capturedJSON["destination"], "Destination field must not be empty")
 	assert.Equal(t, "web:test-session-123", capturedJSON["channel_id"], "Channel ID should be preserved")
 

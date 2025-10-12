@@ -44,7 +44,7 @@ type Client interface {
 
 	SendErrorToChannel(req *RequestMessage, payload ErrorResponse) error
 
-	SendEventToChannel(action MessageAction, payload any, sessionID ChannelID) error
+	SendEventToChannel(action MessageAction, payload any, destination MessageDestination, sessionID ChannelID) error
 
 	// RegisterWill registers a Last Will message to be sent if connection closes unexpectedly
 	RegisterWill(will WillMessage) error
@@ -312,19 +312,7 @@ func (c *client) SendResponse(req *RequestMessage, payload any) error {
 	}, &req.ChannelID)
 }
 
-func (c *client) SendEventToChannel(action MessageAction, payload any, channelID ChannelID) error {
-	// Extract destination from channel ID (e.g., "web:xxx" -> "web")
-	destination := extractDestinationFromChannelID(channelID)
-
-	// DEBUG: Log what we extracted
-	c.logger.WithFields(log.Fields{
-		"action":         action,
-		"channel_id":     channelID,
-		"extracted_dest": destination,
-		"dest_length":    len(destination),
-		"dest_is_empty":  destination == "",
-	}).Debug("[SDK] SendEventToChannel - extracted destination")
-
+func (c *client) SendEventToChannel(action MessageAction, payload any, destination MessageDestination, channelID ChannelID) error {
 	return c.Send(EventMessage{
 		Action:      action,
 		Payload:     payload,
@@ -334,9 +322,10 @@ func (c *client) SendEventToChannel(action MessageAction, payload any, channelID
 	}, &channelID)
 }
 
-// extractDestinationFromChannelID extracts the destination prefix from a channel ID
+// ExtractDestinationFromChannelID extracts the destination prefix from a channel ID
 // For example: "web:session-123" -> "web", "device:device-456" -> "device"
-func extractDestinationFromChannelID(channelID ChannelID) MessageDestination {
+// This is exported so QueuedClient can use it to build EventMessages correctly
+func ExtractDestinationFromChannelID(channelID ChannelID) MessageDestination {
 	// Handle empty or malformed channel IDs
 	if channelID == "" {
 		return DestinationBroadcast

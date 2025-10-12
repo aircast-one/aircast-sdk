@@ -376,9 +376,20 @@ func (qc *QueuedClient) Send(msg any, sessionId *ChannelID) error {
 }
 
 // SendEventToChannel sends an event, queuing it if the connection is down
-// Delegates to the underlying client to ensure destination is properly extracted
-func (qc *QueuedClient) SendEventToChannel(action MessageAction, payload any, sessionID ChannelID) error {
-	return qc.client.SendEventToChannel(action, payload, sessionID)
+// This method builds the EventMessage and uses qc.Send() to get proper queuing behavior for critical messages
+func (qc *QueuedClient) SendEventToChannel(action MessageAction, payload any, destination MessageDestination, sessionID ChannelID) error {
+	// Build the EventMessage
+	event := EventMessage{
+		Action:      action,
+		Payload:     payload,
+		Source:      qc.source,
+		Destination: destination,
+		ChannelID:   sessionID,
+	}
+
+	// Use qc.Send() which has the queuing logic
+	// This will queue critical messages if connection is down, and return nil for them
+	return qc.Send(event, &sessionID)
 }
 
 // Delegate all other methods to the underlying client

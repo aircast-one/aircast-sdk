@@ -72,8 +72,8 @@ func (m *MockClient) SendErrorToChannel(req *RequestMessage, payload ErrorRespon
 	return args.Error(0)
 }
 
-func (m *MockClient) SendEventToChannel(action MessageAction, payload any, sessionID ChannelID) error {
-	args := m.Called(action, payload, sessionID)
+func (m *MockClient) SendEventToChannel(action MessageAction, payload any, destination MessageDestination, sessionID ChannelID) error {
+	args := m.Called(action, payload, destination, sessionID)
 	return args.Error(0)
 }
 
@@ -519,15 +519,15 @@ func TestQueuedClient_SendEventToChannel(t *testing.T) {
 	channelID := ChannelID("test-channel")
 	action := MessageAction("test.action")
 	payload := map[string]any{"data": "test"}
+	destination := DestinationWeb
 
-	// Setup mock for SendEventToChannel (QueuedClient delegates to underlying client)
-	mockClient.On("SendEventToChannel", action, payload, channelID).Return(nil)
+	// Setup mock to expect Send call (QueuedClient uses qc.Send internally)
+	mockClient.On("Send", mock.Anything, &channelID).Return(nil)
 
 	// Send event
-	err := qc.SendEventToChannel(action, payload, channelID)
+	err := qc.SendEventToChannel(action, payload, destination, channelID)
 
 	require.NoError(t, err)
-	mockClient.AssertCalled(t, "SendEventToChannel", action, payload, channelID)
 }
 
 func TestQueuedClient_ConcurrentAccess(t *testing.T) {

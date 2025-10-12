@@ -341,10 +341,11 @@ func BenchmarkClientSendEvent(b *testing.B) {
 
 	action := MessageAction("benchmark_event")
 	payload := map[string]string{"event": "data"}
+	destination := DestinationWeb
 	channelID := ChannelID("channel-bench")
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = client.SendEventToChannel(action, payload, channelID)
+		_ = client.SendEventToChannel(action, payload, destination, channelID)
 	}
 }
