@@ -51,6 +51,10 @@ type Client interface {
 
 	// ClearWill clears the Last Will message (use before graceful disconnect)
 	ClearWill() error
+
+	// SendRawJSON sends pre-serialized JSON bytes directly to the connection
+	// This is useful for forwarding stored messages without re-serialization
+	SendRawJSON(jsonBytes []byte) error
 }
 
 // Connection represents a WebSocket connection
@@ -425,4 +429,15 @@ func (c *client) IsClosed() bool {
 	c.closeMutex.Lock()
 	defer c.closeMutex.Unlock()
 	return c.closed
+}
+
+// SendRawJSON sends pre-serialized JSON bytes directly to the connection
+// This is useful for forwarding stored messages without re-serialization
+func (c *client) SendRawJSON(jsonBytes []byte) error {
+	if c.IsClosed() {
+		return fmt.Errorf("client connection is closed")
+	}
+
+	// Send directly without any processing
+	return c.conn.SendMessage(jsonBytes)
 }

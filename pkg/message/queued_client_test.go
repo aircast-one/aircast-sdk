@@ -87,6 +87,11 @@ func (m *MockClient) ClearWill() error {
 	return args.Error(0)
 }
 
+func (m *MockClient) SendRawJSON(jsonBytes []byte) error {
+	args := m.Called(jsonBytes)
+	return args.Error(0)
+}
+
 func (m *MockClient) SetClosed(closed bool) {
 	m.closedLock.Lock()
 	m.closed = closed

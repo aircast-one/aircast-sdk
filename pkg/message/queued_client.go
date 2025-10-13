@@ -512,3 +512,8 @@ func (qc *QueuedClient) RegisterWill(will WillMessage) error {
 func (qc *QueuedClient) ClearWill() error {
 	return qc.client.ClearWill()
 }
+
+// SendRawJSON sends pre-serialized JSON bytes directly (delegates to underlying client)
+func (qc *QueuedClient) SendRawJSON(jsonBytes []byte) error {
+	return qc.client.SendRawJSON(jsonBytes)
+}
