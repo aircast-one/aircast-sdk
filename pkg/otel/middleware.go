@@ -14,7 +14,7 @@ import (
 // and creates spans for request/response handling
 func TracingMiddleware(tracer trace.Tracer) relay.Middleware {
 	return func(next relay.ActionHandler) relay.ActionHandler {
-		return func(ctx context.Context, req *relay.Request, res relay.ResponseWriter) error {
+		return func(ctx context.Context, req *relay.Request) (any, error) {
 			// Extract trace context from request
 			ctx = ExtractTraceContext(ctx, req.TraceContext)
 
@@ -34,14 +34,14 @@ func TracingMiddleware(tracer trace.Tracer) relay.Middleware {
 			)
 
 			// Execute the handler with the instrumented context
-			err := next(ctx, req, res)
+			payload, err := next(ctx, req)
 
 			// Record error if any
 			if err != nil {
 				span.RecordError(err)
 			}
 
-			return err
+			return payload, err
 		}
 	}
 }

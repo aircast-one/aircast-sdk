@@ -11,81 +11,111 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-// MockResponseWriter for testing
-type MockResponseWriter struct {
+// MockClient for testing
+type MockClient struct {
 	mock.Mock
 }
 
-func (m *MockResponseWriter) SendSuccess(payload any) error {
-	args := m.Called(payload)
+func (m *MockClient) Send(msg any, sessionId *message.ChannelID) error {
+	args := m.Called(msg, sessionId)
 	return args.Error(0)
 }
 
-func (m *MockResponseWriter) SendError(code string, message string) error {
-	args := m.Called(code, message)
+func (m *MockClient) SendMessageToChannel(id message.ChannelID, msg any) error {
+	args := m.Called(id, msg)
+	return args.Error(0)
+}
+
+func (m *MockClient) SendBroadcastMessage(msg any) error {
+	args := m.Called(msg)
+	return args.Error(0)
+}
+
+func (m *MockClient) SendResponse(req *message.RequestMessage, payload any) error {
+	args := m.Called(req, payload)
+	return args.Error(0)
+}
+
+func (m *MockClient) SendErrorToChannel(req *message.RequestMessage, payload message.ErrorResponse) error {
+	args := m.Called(req, payload)
+	return args.Error(0)
+}
+
+func (m *MockClient) SendEventToChannel(action message.MessageAction, payload any, destination message.MessageDestination, sessionID message.ChannelID) error {
+	args := m.Called(action, payload, destination, sessionID)
+	return args.Error(0)
+}
+
+func (m *MockClient) Listen(ctx context.Context) error {
+	args := m.Called(ctx)
+	return args.Error(0)
+}
+
+func (m *MockClient) Close() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m *MockClient) IsClosed() bool {
+	args := m.Called()
+	return args.Bool(0)
+}
+
+func (m *MockClient) ReadMessage() <-chan any {
+	args := m.Called()
+	return args.Get(0).(<-chan any)
+}
+
+func (m *MockClient) RegisterWill(will message.WillMessage) error {
+	args := m.Called(will)
+	return args.Error(0)
+}
+
+func (m *MockClient) ClearWill() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
+func (m *MockClient) SendRawJSON(jsonBytes []byte) error {
+	args := m.Called(jsonBytes)
 	return args.Error(0)
 }
 
 // Test helper functions
 
-func createTestRouter() (*Router, *mockResponseFactory, *mockErrorSender) {
+func createTestRouter() (*Router, *MockClient) {
 	logger := logrus.NewEntry(logrus.New())
 	logger.Logger.SetLevel(logrus.PanicLevel) // Suppress logs in tests
 
-	respFactory := &mockResponseFactory{}
-	errSender := &mockErrorSender{}
+	client := &MockClient{}
+	router := NewRouter(logger, client)
 
-	router := NewRouter(logger, respFactory.factory, errSender.sender)
-
-	return router, respFactory, errSender
-}
-
-type mockResponseFactory struct {
-	responseWriter ResponseWriter
-}
-
-func (m *mockResponseFactory) factory(ctx context.Context, req *Request, logger *logrus.Entry) ResponseWriter {
-	if m.responseWriter != nil {
-		return m.responseWriter
-	}
-	return &MockResponseWriter{}
-}
-
-type mockErrorSender struct {
-	lastError error
-}
-
-func (m *mockErrorSender) sender(ctx context.Context, req *Request, code, message string) error {
-	return m.lastError
+	return router, client
 }
 
 // Tests
 
 func TestNewRouter(t *testing.T) {
 	logger := logrus.NewEntry(logrus.New())
-	respFactory := func(ctx context.Context, req *Request, logger *logrus.Entry) ResponseWriter {
-		return &MockResponseWriter{}
-	}
-	errSender := func(ctx context.Context, req *Request, code, message string) error {
-		return nil
-	}
+	client := &MockClient{}
 
-	router := NewRouter(logger, respFactory, errSender)
+	router := NewRouter(logger, client)
 
 	assert.NotNil(t, router)
 	assert.NotNil(t, router.routes)
 	assert.NotNil(t, router.middlewares)
 	assert.NotNil(t, router.eventRoutes)
 	assert.NotNil(t, router.eventMiddlewares)
+	assert.NotNil(t, router.client)
 }
 
 func TestRouter_HandleRequest_BasicRegistration(t *testing.T) {
-	router, _, _ := createTestRouter()
+	router, _ := createTestRouter()
 
 	handlerCalled := false
-	handler := func(ctx context.Context, req *Request, res ResponseWriter) error {
+	handler := func(ctx context.Context, req *Request) (any, error) {
 		handlerCalled = true
-		return nil
+		return map[string]string{"status": "ok"}, nil
 	}
 
 	router.HandleRequest("test.action", handler)
@@ -95,41 +125,41 @@ func TestRouter_HandleRequest_BasicRegistration(t *testing.T) {
 	assert.NotNil(t, registeredHandler)
 
 	// Execute handler
-	mockRes := &MockResponseWriter{}
-	err := registeredHandler(context.Background(), &Request{}, mockRes)
+	payload, err := registeredHandler(context.Background(), &Request{})
 	assert.NoError(t, err)
+	assert.NotNil(t, payload)
 	assert.True(t, handlerCalled)
 }
 
 func TestRouter_HandleRequest_WithGlobalMiddleware(t *testing.T) {
-	router, _, _ := createTestRouter()
+	router, _ := createTestRouter()
 
 	var executionOrder []string
 
 	// Middleware 1
 	middleware1 := func(next ActionHandler) ActionHandler {
-		return func(ctx context.Context, req *Request, res ResponseWriter) error {
+		return func(ctx context.Context, req *Request) (any, error) {
 			executionOrder = append(executionOrder, "mw1_before")
-			err := next(ctx, req, res)
+			payload, err := next(ctx, req)
 			executionOrder = append(executionOrder, "mw1_after")
-			return err
+			return payload, err
 		}
 	}
 
 	// Middleware 2
 	middleware2 := func(next ActionHandler) ActionHandler {
-		return func(ctx context.Context, req *Request, res ResponseWriter) error {
+		return func(ctx context.Context, req *Request) (any, error) {
 			executionOrder = append(executionOrder, "mw2_before")
-			err := next(ctx, req, res)
+			payload, err := next(ctx, req)
 			executionOrder = append(executionOrder, "mw2_after")
-			return err
+			return payload, err
 		}
 	}
 
 	// Handler
-	handler := func(ctx context.Context, req *Request, res ResponseWriter) error {
+	handler := func(ctx context.Context, req *Request) (any, error) {
 		executionOrder = append(executionOrder, "handler")
-		return nil
+		return nil, nil
 	}
 
 	// Register global middleware
@@ -141,7 +171,7 @@ func TestRouter_HandleRequest_WithGlobalMiddleware(t *testing.T) {
 
 	// Execute
 	h, _ := router.GetHandler("test.action")
-	err := h(context.Background(), &Request{}, &MockResponseWriter{})
+	_, err := h(context.Background(), &Request{})
 
 	assert.NoError(t, err)
 	assert.Equal(t, []string{
@@ -154,88 +184,97 @@ func TestRouter_HandleRequest_WithGlobalMiddleware(t *testing.T) {
 }
 
 func TestRouter_ProcessRequest_Success(t *testing.T) {
-	router, respFactory, _ := createTestRouter()
+	router, client := createTestRouter()
 
-	mockRes := &MockResponseWriter{}
-	mockRes.On("SendSuccess", map[string]any{"result": "success"}).Return(nil)
-	respFactory.responseWriter = mockRes
+	client.On("SendResponse", mock.AnythingOfType("*message.RequestMessage"), map[string]any{"result": "success"}).Return(nil)
 
 	handlerCalled := false
-	router.HandleRequest("test.action", func(ctx context.Context, req *Request, res ResponseWriter) error {
+	router.HandleRequest("test.action", func(ctx context.Context, req *Request) (any, error) {
 		handlerCalled = true
-		return res.SendSuccess(map[string]any{"result": "success"})
+		return map[string]any{"result": "success"}, nil
 	})
 
 	msg := message.RequestMessage{
-		Action:    "test.action",
-		RequestID: "req-123",
-		ChannelID: "session-123",
-		Source:    "web",
-		Payload:   map[string]any{"data": "test"},
+		Action:      "test.action",
+		RequestID:   "req-123",
+		ChannelID:   "session-123",
+		Source:      "web",
+		Destination: "device",
+		Payload:     map[string]any{"data": "test"},
 	}
 
 	err := router.ProcessRequest(context.Background(), msg)
 	assert.NoError(t, err)
 	assert.True(t, handlerCalled)
-	mockRes.AssertExpectations(t)
+	client.AssertExpectations(t)
 }
 
 func TestRouter_ProcessRequest_UnknownAction(t *testing.T) {
-	router, _, errSender := createTestRouter()
+	router, client := createTestRouter()
 
-	errSender.lastError = nil
-
-	msg := message.RequestMessage{
-		Action:    "unknown.action",
-		RequestID: "req-123",
-		ChannelID: "session-123",
-		Source:    "web",
-	}
-
-	err := router.ProcessRequest(context.Background(), msg)
-	assert.NoError(t, err) // errorSender returned nil
-}
-
-func TestRouter_ProcessRequest_InvalidMessage(t *testing.T) {
-	router, _, _ := createTestRouter()
+	client.On("SendErrorToChannel", mock.AnythingOfType("*message.RequestMessage"), mock.MatchedBy(func(errResp message.ErrorResponse) bool {
+		return errResp.Code == "UNKNOWN_ACTION"
+	})).Return(nil)
 
 	msg := message.RequestMessage{
-		Action:    "test.action",
-		RequestID: "", // Missing required field
-		ChannelID: "session-123",
-		Source:    "web",
-	}
-
-	err := router.ProcessRequest(context.Background(), msg)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "request ID is required")
-}
-
-func TestRouter_ProcessRequest_HandlerError(t *testing.T) {
-	router, respFactory, _ := createTestRouter()
-
-	mockRes := &MockResponseWriter{}
-	mockRes.On("SendError", "TEST_ERROR", "test error").Return(nil)
-	respFactory.responseWriter = mockRes
-
-	router.HandleRequest("test.action", func(ctx context.Context, req *Request, res ResponseWriter) error {
-		return res.SendError("TEST_ERROR", "test error")
-	})
-
-	msg := message.RequestMessage{
-		Action:    "test.action",
-		RequestID: "req-123",
-		ChannelID: "session-123",
-		Source:    "web",
+		Action:      "unknown.action",
+		RequestID:   "req-123",
+		ChannelID:   "session-123",
+		Source:      "web",
+		Destination: "device",
 	}
 
 	err := router.ProcessRequest(context.Background(), msg)
 	assert.NoError(t, err)
-	mockRes.AssertExpectations(t)
+	client.AssertExpectations(t)
+}
+
+func TestRouter_ProcessRequest_InvalidMessage(t *testing.T) {
+	router, client := createTestRouter()
+
+	client.On("SendErrorToChannel", mock.AnythingOfType("*message.RequestMessage"), mock.MatchedBy(func(errResp message.ErrorResponse) bool {
+		return errResp.Code == "INVALID_REQUEST"
+	})).Return(nil)
+
+	msg := message.RequestMessage{
+		Action:      "test.action",
+		RequestID:   "", // Missing required field
+		ChannelID:   "session-123",
+		Source:      "web",
+		Destination: "device",
+	}
+
+	err := router.ProcessRequest(context.Background(), msg)
+	assert.NoError(t, err)
+	client.AssertExpectations(t)
+}
+
+func TestRouter_ProcessRequest_HandlerError(t *testing.T) {
+	router, client := createTestRouter()
+
+	client.On("SendErrorToChannel", mock.AnythingOfType("*message.RequestMessage"), mock.MatchedBy(func(errResp message.ErrorResponse) bool {
+		return errResp.Code == "HANDLER_ERROR" && errResp.Message == "test error"
+	})).Return(nil)
+
+	router.HandleRequest("test.action", func(ctx context.Context, req *Request) (any, error) {
+		return nil, errors.New("test error")
+	})
+
+	msg := message.RequestMessage{
+		Action:      "test.action",
+		RequestID:   "req-123",
+		ChannelID:   "session-123",
+		Source:      "web",
+		Destination: "device",
+	}
+
+	err := router.ProcessRequest(context.Background(), msg)
+	assert.NoError(t, err)
+	client.AssertExpectations(t)
 }
 
 func TestRouter_HandleEvent_Registration(t *testing.T) {
-	router, _, _ := createTestRouter()
+	router, _ := createTestRouter()
 
 	eventCalled := false
 	handler := func(ctx context.Context, event *EventRequest) error {
@@ -246,10 +285,11 @@ func TestRouter_HandleEvent_Registration(t *testing.T) {
 	router.HandleEvent("test.event", handler)
 
 	msg := message.EventMessage{
-		Action:    "test.event",
-		ChannelID: "session-123",
-		Source:    "web",
-		Payload:   map[string]any{"data": "test"},
+		Action:      "test.event",
+		ChannelID:   "session-123",
+		Source:      "web",
+		Destination: "device",
+		Payload:     map[string]any{"data": "test"},
 	}
 
 	err := router.ProcessEvent(context.Background(), msg)
@@ -258,12 +298,13 @@ func TestRouter_HandleEvent_Registration(t *testing.T) {
 }
 
 func TestRouter_ProcessEvent_UnknownAction(t *testing.T) {
-	router, _, _ := createTestRouter()
+	router, _ := createTestRouter()
 
 	msg := message.EventMessage{
-		Action:    "unknown.event",
-		ChannelID: "session-123",
-		Source:    "web",
+		Action:      "unknown.event",
+		ChannelID:   "session-123",
+		Source:      "web",
+		Destination: "device",
 	}
 
 	err := router.ProcessEvent(context.Background(), msg)
@@ -271,7 +312,7 @@ func TestRouter_ProcessEvent_UnknownAction(t *testing.T) {
 }
 
 func TestRouter_ProcessEvent_HandlerError(t *testing.T) {
-	router, _, _ := createTestRouter()
+	router, _ := createTestRouter()
 
 	expectedError := errors.New("handler error")
 	router.HandleEvent("test.event", func(ctx context.Context, event *EventRequest) error {
@@ -279,9 +320,10 @@ func TestRouter_ProcessEvent_HandlerError(t *testing.T) {
 	})
 
 	msg := message.EventMessage{
-		Action:    "test.event",
-		ChannelID: "session-123",
-		Source:    "web",
+		Action:      "test.event",
+		ChannelID:   "session-123",
+		Source:      "web",
+		Destination: "device",
 	}
 
 	err := router.ProcessEvent(context.Background(), msg)
@@ -290,7 +332,7 @@ func TestRouter_ProcessEvent_HandlerError(t *testing.T) {
 }
 
 func TestRouter_UseEventMiddleware(t *testing.T) {
-	router, _, _ := createTestRouter()
+	router, _ := createTestRouter()
 
 	var executionOrder []string
 
@@ -312,9 +354,10 @@ func TestRouter_UseEventMiddleware(t *testing.T) {
 	router.HandleEvent("test.event", handler)
 
 	msg := message.EventMessage{
-		Action:    "test.event",
-		ChannelID: "session-123",
-		Source:    "web",
+		Action:      "test.event",
+		ChannelID:   "session-123",
+		Source:      "web",
+		Destination: "device",
 	}
 
 	err := router.ProcessEvent(context.Background(), msg)
@@ -326,231 +369,25 @@ func TestRouter_UseEventMiddleware(t *testing.T) {
 	}, executionOrder)
 }
 
-// Handler Adaptation Tests
+func TestRouter_AdaptSimpleHandlers(t *testing.T) {
+	router, client := createTestRouter()
 
-func TestRouter_AdaptHandler_NoArgFunction(t *testing.T) {
-	router, respFactory, _ := createTestRouter()
+	client.On("SendResponse", mock.AnythingOfType("*message.RequestMessage"), "test result").Return(nil)
 
-	mockRes := &MockResponseWriter{}
-	mockRes.On("SendSuccess", "result").Return(nil)
-	respFactory.responseWriter = mockRes
-
-	// Register func() any
-	router.HandleRequest("test.action", func() any {
-		return "result"
+	// Test adapting func() any
+	router.HandleRequest("simple.noargs", func() any {
+		return "test result"
 	})
 
 	msg := message.RequestMessage{
-		Action:    "test.action",
-		RequestID: "req-123",
-		ChannelID: "session-123",
-		Source:    "web",
+		Action:      "simple.noargs",
+		RequestID:   "req-123",
+		ChannelID:   "session-123",
+		Source:      "web",
+		Destination: "device",
 	}
 
 	err := router.ProcessRequest(context.Background(), msg)
 	assert.NoError(t, err)
-	mockRes.AssertExpectations(t)
-}
-
-func TestRouter_AdaptHandler_NoArgWithErrorFunction(t *testing.T) {
-	router, respFactory, _ := createTestRouter()
-
-	mockRes := &MockResponseWriter{}
-	mockRes.On("SendSuccess", "result").Return(nil)
-	respFactory.responseWriter = mockRes
-
-	// Register func() (any, error)
-	router.HandleRequest("test.action", func() (any, error) {
-		return "result", nil
-	})
-
-	msg := message.RequestMessage{
-		Action:    "test.action",
-		RequestID: "req-123",
-		ChannelID: "session-123",
-		Source:    "web",
-	}
-
-	err := router.ProcessRequest(context.Background(), msg)
-	assert.NoError(t, err)
-	mockRes.AssertExpectations(t)
-}
-
-func TestRouter_AdaptHandler_NoArgWithErrorFunction_Error(t *testing.T) {
-	router, respFactory, _ := createTestRouter()
-
-	mockRes := &MockResponseWriter{}
-	mockRes.On("SendError", "SERVICE_UNAVAILABLE", "test error").Return(nil)
-	respFactory.responseWriter = mockRes
-
-	// Register func() (any, error) that returns error
-	router.HandleRequest("test.action", func() (any, error) {
-		return nil, errors.New("test error")
-	})
-
-	msg := message.RequestMessage{
-		Action:    "test.action",
-		RequestID: "req-123",
-		ChannelID: "session-123",
-		Source:    "web",
-	}
-
-	err := router.ProcessRequest(context.Background(), msg)
-	assert.NoError(t, err)
-	mockRes.AssertExpectations(t)
-}
-
-func TestRouter_AdaptHandler_SingleArgFunction(t *testing.T) {
-	router, respFactory, _ := createTestRouter()
-
-	mockRes := &MockResponseWriter{}
-	mockRes.On("SendSuccess", "processed: test").Return(nil)
-	respFactory.responseWriter = mockRes
-
-	// Register func(any) any
-	router.HandleRequest("test.action", func(payload any) any {
-		payloadMap := payload.(map[string]any)
-		return "processed: " + payloadMap["input"].(string)
-	})
-
-	msg := message.RequestMessage{
-		Action:    "test.action",
-		RequestID: "req-123",
-		ChannelID: "session-123",
-		Source:    "web",
-		Payload:   map[string]any{"input": "test"},
-	}
-
-	err := router.ProcessRequest(context.Background(), msg)
-	assert.NoError(t, err)
-	mockRes.AssertExpectations(t)
-}
-
-func TestRouter_AdaptHandler_SingleArgWithErrorFunction(t *testing.T) {
-	router, respFactory, _ := createTestRouter()
-
-	mockRes := &MockResponseWriter{}
-	mockRes.On("SendSuccess", "processed").Return(nil)
-	respFactory.responseWriter = mockRes
-
-	// Register func(any) (any, error)
-	router.HandleRequest("test.action", func(payload any) (any, error) {
-		return "processed", nil
-	})
-
-	msg := message.RequestMessage{
-		Action:    "test.action",
-		RequestID: "req-123",
-		ChannelID: "session-123",
-		Source:    "web",
-		Payload:   map[string]any{"input": "test"},
-	}
-
-	err := router.ProcessRequest(context.Background(), msg)
-	assert.NoError(t, err)
-	mockRes.AssertExpectations(t)
-}
-
-func TestRouter_AdaptHandler_SingleArgWithErrorFunction_Error(t *testing.T) {
-	router, respFactory, _ := createTestRouter()
-
-	mockRes := &MockResponseWriter{}
-	mockRes.On("SendError", "SERVICE_UNAVAILABLE", "test error").Return(nil)
-	respFactory.responseWriter = mockRes
-
-	// Register func(any) (any, error) that returns error
-	router.HandleRequest("test.action", func(payload any) (any, error) {
-		return nil, errors.New("test error")
-	})
-
-	msg := message.RequestMessage{
-		Action:    "test.action",
-		RequestID: "req-123",
-		ChannelID: "session-123",
-		Source:    "web",
-		Payload:   map[string]any{"input": "test"},
-	}
-
-	err := router.ProcessRequest(context.Background(), msg)
-	assert.NoError(t, err)
-	mockRes.AssertExpectations(t)
-}
-
-func TestRouter_HandleRequest_Panic_NoComponents(t *testing.T) {
-	router, _, _ := createTestRouter()
-
-	assert.Panics(t, func() {
-		router.HandleRequest("test.action")
-	})
-}
-
-func TestRouter_HandleRequest_Panic_InvalidComponent(t *testing.T) {
-	router, _, _ := createTestRouter()
-
-	assert.Panics(t, func() {
-		router.HandleRequest("test.action", "not a handler")
-	})
-}
-
-func TestRouter_HandleRequest_Panic_InvalidMiddleware(t *testing.T) {
-	router, _, _ := createTestRouter()
-
-	handler := func(ctx context.Context, req *Request, res ResponseWriter) error {
-		return nil
-	}
-
-	assert.Panics(t, func() {
-		router.HandleRequest("test.action", "not middleware", handler)
-	})
-}
-
-func TestRouter_TraceContext_Propagation(t *testing.T) {
-	router, respFactory, _ := createTestRouter()
-
-	mockRes := &MockResponseWriter{}
-	mockRes.On("SendSuccess", mock.Anything).Return(nil)
-	respFactory.responseWriter = mockRes
-
-	var receivedTraceContext map[string]string
-	router.HandleRequest("test.action", func(ctx context.Context, req *Request, res ResponseWriter) error {
-		receivedTraceContext = req.TraceContext
-		return res.SendSuccess(map[string]any{"ok": true})
-	})
-
-	msg := message.RequestMessage{
-		Action:    "test.action",
-		RequestID: "req-123",
-		ChannelID: "session-123",
-		Source:    "web",
-		TraceContext: map[string]string{
-			"traceparent": "00-trace-id-span-id-01",
-		},
-	}
-
-	err := router.ProcessRequest(context.Background(), msg)
-	assert.NoError(t, err)
-	assert.Equal(t, "00-trace-id-span-id-01", receivedTraceContext["traceparent"])
-}
-
-func TestRouter_EventTraceContext_Propagation(t *testing.T) {
-	router, _, _ := createTestRouter()
-
-	var receivedTraceContext map[string]string
-	router.HandleEvent("test.event", func(ctx context.Context, event *EventRequest) error {
-		receivedTraceContext = event.TraceContext
-		return nil
-	})
-
-	msg := message.EventMessage{
-		Action:    "test.event",
-		ChannelID: "session-123",
-		Source:    "web",
-		TraceContext: map[string]string{
-			"traceparent": "00-event-trace-id-span-id-01",
-		},
-	}
-
-	err := router.ProcessEvent(context.Background(), msg)
-	assert.NoError(t, err)
-	assert.Equal(t, "00-event-trace-id-span-id-01", receivedTraceContext["traceparent"])
+	client.AssertExpectations(t)
 }

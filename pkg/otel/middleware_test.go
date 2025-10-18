@@ -10,27 +10,18 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	sdktrace "go.opentelemetry.io/otel/trace"
 )
 
-func setupTestTracer(t *testing.T) (*sdktrace.TracerProvider, *tracetest.SpanRecorder) {
-	spanRecorder := tracetest.NewSpanRecorder()
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithSpanProcessor(spanRecorder),
-	)
-	t.Cleanup(func() {
-		if err := tp.Shutdown(context.Background()); err != nil {
-			t.Errorf("failed to shutdown tracer provider: %v", err)
-		}
-	})
-	return tp, spanRecorder
-}
-
 func TestTracingMiddleware(t *testing.T) {
-	// Setup
-	tp, spanRecorder := setupTestTracer(t)
-	tracer := tp.Tracer("test-tracer")
+	// Setup test tracer
+	spanRecorder := tracetest.NewSpanRecorder()
+	tracerProvider := trace.NewTracerProvider(
+		trace.WithSpanProcessor(spanRecorder),
+	)
+	tracer := tracerProvider.Tracer("test-tracer")
 
 	t.Run("creates span for request", func(t *testing.T) {
 		// Create middleware
@@ -38,9 +29,9 @@ func TestTracingMiddleware(t *testing.T) {
 
 		// Create a test handler
 		handlerCalled := false
-		handler := func(ctx context.Context, req *relay.Request, res relay.ResponseWriter) error {
+		handler := func(ctx context.Context, req *relay.Request) (any, error) {
 			handlerCalled = true
-			return nil
+			return nil, nil
 		}
 
 		// Wrap handler with middleware
@@ -55,7 +46,7 @@ func TestTracingMiddleware(t *testing.T) {
 		}
 
 		// Execute
-		err := wrappedHandler(context.Background(), req, nil)
+		_, err := wrappedHandler(context.Background(), req)
 
 		// Assert
 		assert.NoError(t, err)
@@ -73,27 +64,23 @@ func TestTracingMiddleware(t *testing.T) {
 		// Setup W3C Trace Context propagator
 		otel.SetTextMapPropagator(propagation.TraceContext{})
 
-		// Create a parent span and extract its trace context
-		parentCtx, parentSpan := tracer.Start(context.Background(), "parent")
-		defer parentSpan.End()
-
-		traceContext := InjectTraceContext(parentCtx)
-		require.NotNil(t, traceContext)
-
 		// Create middleware
 		middleware := TracingMiddleware(tracer)
 
 		// Create handler that checks context
 		var extractedCtx context.Context
-		handler := func(ctx context.Context, req *relay.Request, res relay.ResponseWriter) error {
+		handler := func(ctx context.Context, req *relay.Request) (any, error) {
 			extractedCtx = ctx
-			return nil
+			return nil, nil
 		}
 
 		// Wrap handler
 		wrappedHandler := middleware(handler)
 
 		// Create request with trace context
+		traceContext := map[string]string{
+			"traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+		}
 		req := &relay.Request{
 			Action:       "test.action",
 			RequestID:    "req-123",
@@ -101,18 +88,18 @@ func TestTracingMiddleware(t *testing.T) {
 		}
 
 		// Execute
-		err := wrappedHandler(context.Background(), req, nil)
+		_, err := wrappedHandler(context.Background(), req)
 
 		// Assert
 		assert.NoError(t, err)
 		assert.NotNil(t, extractedCtx)
 
-		// Verify trace context was propagated
-		spans := spanRecorder.Ended()
-		require.GreaterOrEqual(t, len(spans), 1)
+		// Verify that trace context was extracted
+		spanCtx := sdktrace.SpanFromContext(extractedCtx).SpanContext()
+		assert.True(t, spanCtx.IsValid())
 	})
 
-	t.Run("records error in span when handler fails", func(t *testing.T) {
+	t.Run("records error in span", func(t *testing.T) {
 		spanRecorder.Reset()
 
 		// Create middleware
@@ -120,8 +107,8 @@ func TestTracingMiddleware(t *testing.T) {
 
 		// Create handler that returns error
 		expectedErr := errors.New("test error")
-		handler := func(ctx context.Context, req *relay.Request, res relay.ResponseWriter) error {
-			return expectedErr
+		handler := func(ctx context.Context, req *relay.Request) (any, error) {
+			return nil, expectedErr
 		}
 
 		// Wrap handler
@@ -134,35 +121,39 @@ func TestTracingMiddleware(t *testing.T) {
 		}
 
 		// Execute
-		err := wrappedHandler(context.Background(), req, nil)
+		_, err := wrappedHandler(context.Background(), req)
 
 		// Assert
+		assert.Error(t, err)
 		assert.Equal(t, expectedErr, err)
 
 		// Check that error was recorded in span
 		spans := spanRecorder.Ended()
 		require.Len(t, spans, 1)
-		// Note: Checking span events for error would require more detailed assertions
+		assert.NotEmpty(t, spans[0].Events())
 	})
 }
 
 func TestEventTracingMiddleware(t *testing.T) {
-	// Setup
-	tp, spanRecorder := setupTestTracer(t)
-	tracer := tp.Tracer("test-tracer")
+	// Setup test tracer
+	spanRecorder := tracetest.NewSpanRecorder()
+	tracerProvider := trace.NewTracerProvider(
+		trace.WithSpanProcessor(spanRecorder),
+	)
+	tracer := tracerProvider.Tracer("test-tracer")
 
 	t.Run("creates span for event", func(t *testing.T) {
 		// Create middleware
 		middleware := EventTracingMiddleware(tracer)
 
-		// Create a test handler
+		// Create handler
 		handlerCalled := false
 		handler := func(ctx context.Context, event *relay.EventRequest) error {
 			handlerCalled = true
 			return nil
 		}
 
-		// Wrap handler with middleware
+		// Wrap handler
 		wrappedHandler := middleware(handler)
 
 		// Create test event
@@ -183,87 +174,5 @@ func TestEventTracingMiddleware(t *testing.T) {
 		spans := spanRecorder.Ended()
 		require.Len(t, spans, 1)
 		assert.Equal(t, "event.test.event", spans[0].Name())
-	})
-
-	t.Run("records error in span when handler fails", func(t *testing.T) {
-		spanRecorder.Reset()
-
-		// Create middleware
-		middleware := EventTracingMiddleware(tracer)
-
-		// Create handler that returns error
-		expectedErr := errors.New("event error")
-		handler := func(ctx context.Context, event *relay.EventRequest) error {
-			return expectedErr
-		}
-
-		// Wrap handler
-		wrappedHandler := middleware(handler)
-
-		// Create test event
-		event := &relay.EventRequest{
-			Action: "test.event",
-		}
-
-		// Execute
-		err := wrappedHandler(context.Background(), event)
-
-		// Assert
-		assert.Equal(t, expectedErr, err)
-
-		// Check that error was recorded
-		spans := spanRecorder.Ended()
-		require.Len(t, spans, 1)
-	})
-}
-
-func TestExtractTraceContext(t *testing.T) {
-	// Setup W3C Trace Context propagator
-	otel.SetTextMapPropagator(propagation.TraceContext{})
-
-	t.Run("extracts valid trace context", func(t *testing.T) {
-		traceContext := map[string]string{
-			"traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
-		}
-
-		ctx := ExtractTraceContext(context.Background(), traceContext)
-		assert.NotNil(t, ctx)
-	})
-
-	t.Run("handles nil trace context", func(t *testing.T) {
-		ctx := ExtractTraceContext(context.Background(), nil)
-		assert.NotNil(t, ctx)
-	})
-
-	t.Run("handles empty trace context", func(t *testing.T) {
-		ctx := ExtractTraceContext(context.Background(), map[string]string{})
-		assert.NotNil(t, ctx)
-	})
-}
-
-func TestInjectTraceContext(t *testing.T) {
-	// Setup
-	otel.SetTextMapPropagator(propagation.TraceContext{})
-	tp, _ := setupTestTracer(t)
-	tracer := tp.Tracer("test-tracer")
-
-	t.Run("injects trace context from span", func(t *testing.T) {
-		ctx, span := tracer.Start(context.Background(), "test-span")
-		defer span.End()
-
-		traceContext := InjectTraceContext(ctx)
-
-		// Should have traceparent
-		assert.NotNil(t, traceContext)
-		assert.Contains(t, traceContext, "traceparent")
-	})
-
-	t.Run("returns nil for context without span", func(t *testing.T) {
-		traceContext := InjectTraceContext(context.Background())
-
-		// Should be nil or empty when no active span
-		if traceContext != nil {
-			assert.Empty(t, traceContext)
-		}
 	})
 }

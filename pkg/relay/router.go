@@ -9,8 +9,8 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// ActionHandler processes an action with the given context, request, and response.
-type ActionHandler func(ctx context.Context, req *Request, res ResponseWriter) error
+// ActionHandler processes an action with the given context and request, returning a response payload or error.
+type ActionHandler func(ctx context.Context, req *Request) (payload any, err error)
 
 // EventHandler processes an event with the given context and event data.
 type EventHandler func(ctx context.Context, event *EventRequest) error
@@ -21,33 +21,24 @@ type Middleware func(ActionHandler) ActionHandler
 // EventMiddleware wraps an EventHandler for pre- and post-processing.
 type EventMiddleware func(EventHandler) EventHandler
 
-// ResponseFactory creates a ResponseWriter for the given request.
-// Services implement this to provide their specific response routing logic.
-type ResponseFactory func(ctx context.Context, req *Request, logger *logrus.Entry) ResponseWriter
-
-// ErrorSender sends error responses when no handler is found or validation fails.
-type ErrorSender func(ctx context.Context, req *Request, code, message string) error
-
 // Router stores registered action handlers and global middleware.
 type Router struct {
 	routes           map[string]ActionHandler // action name → handler
 	middlewares      []Middleware             // global middleware stack
 	eventRoutes      map[string]EventHandler  // event action name → handler
 	eventMiddlewares []EventMiddleware        // event middleware stack
-	responseFactory  ResponseFactory          // creates responses for handlers
-	errorSender      ErrorSender              // sends errors when no handler found
+	client           message.Client           // message client for sending responses
 	logger           *logrus.Entry
 }
 
-// NewRouter creates a new Router with the given logger, response factory, and error sender.
-func NewRouter(logger *logrus.Entry, responseFactory ResponseFactory, errorSender ErrorSender) *Router {
+// NewRouter creates a new Router with the given logger and message client.
+func NewRouter(logger *logrus.Entry, client message.Client) *Router {
 	return &Router{
 		routes:           make(map[string]ActionHandler),
 		middlewares:      []Middleware{},
 		eventRoutes:      make(map[string]EventHandler),
 		eventMiddlewares: []EventMiddleware{},
-		responseFactory:  responseFactory,
-		errorSender:      errorSender,
+		client:           client,
 		logger:           logger.WithField("component", "router"),
 	}
 }
@@ -132,25 +123,33 @@ func (r *Router) ProcessRequest(ctx context.Context, m message.RequestMessage) e
 	req, err := CreateFromRequestMessage(m)
 	if err != nil {
 		r.logger.WithError(err).Error("Invalid request message")
-		return err
+		return r.sendError(&m, "INVALID_REQUEST", err.Error())
 	}
 
 	handlerFunc, exists := r.routes[req.Action]
 	if !exists {
 		r.logger.WithField("action", req.Action).Warn("No handler found for request action")
-		return r.errorSender(ctx, req, "INVALID_REQUEST", fmt.Sprintf("Unknown action %q", req.Action))
+		return r.sendError(&m, "UNKNOWN_ACTION", fmt.Sprintf("Unknown action %q", req.Action))
 	}
 
 	r.logger.WithField("action", req.Action).Debug("Found handler, executing...")
 
-	resp := r.responseFactory(ctx, req, r.logger)
-	if err := handlerFunc(ctx, req, resp); err != nil {
+	payload, err := handlerFunc(ctx, req)
+	if err != nil {
 		r.logger.WithError(err).WithField("action", req.Action).Error("Failed to handle request")
-		return err
+		return r.sendError(&m, "HANDLER_ERROR", err.Error())
 	}
 
 	r.logger.WithField("action", req.Action).Debug("Request handled successfully")
-	return nil
+	return r.client.SendResponse(&m, payload)
+}
+
+// sendError sends an error response for a request
+func (r *Router) sendError(reqMsg *message.RequestMessage, code, msg string) error {
+	return r.client.SendErrorToChannel(reqMsg, message.ErrorResponse{
+		Code:    code,
+		Message: msg,
+	})
 }
 
 // ProcessEvent processes an event message
@@ -215,27 +214,32 @@ func (r *Router) tryReflectionAdapter(candidate any, typ reflect.Type) ActionHan
 		return nil
 	}
 
-	return func(ctx context.Context, req *Request, res ResponseWriter) error {
+	return func(ctx context.Context, req *Request) (any, error) {
 		outs := reflect.ValueOf(candidate).Call([]reflect.Value{
 			reflect.ValueOf(ctx),
 			reflect.ValueOf(req),
-			reflect.ValueOf(res),
 		})
 
-		if errVal := outs[0]; !errVal.IsNil() {
-			return errVal.Interface().(error)
+		var payload any
+		var err error
+
+		if !outs[0].IsNil() {
+			payload = outs[0].Interface()
 		}
-		return nil
+		if !outs[1].IsNil() {
+			err = outs[1].Interface().(error)
+		}
+
+		return payload, err
 	}
 }
 
 // isValidActionHandlerSignature checks if the function signature matches ActionHandler requirements
 func (r *Router) isValidActionHandlerSignature(typ reflect.Type) bool {
-	return typ.NumIn() == 3 && typ.NumOut() == 1 &&
+	return typ.NumIn() == 2 && typ.NumOut() == 2 &&
 		typ.In(0).String() == "context.Context" &&
 		typ.In(1).AssignableTo(reflect.TypeOf(&Request{})) &&
-		typ.In(2).Implements(reflect.TypeOf((*ResponseWriter)(nil)).Elem()) &&
-		typ.Out(0).AssignableTo(reflect.TypeOf((*error)(nil)).Elem())
+		typ.Out(1).AssignableTo(reflect.TypeOf((*error)(nil)).Elem())
 }
 
 // trySimpleFunctionAdapters attempts to adapt simple function signatures
@@ -260,9 +264,8 @@ func (r *Router) trySimpleFunctionAdapters(candidate any) ActionHandler {
 // adaptNoArgFunction adapts func() any
 func (r *Router) adaptNoArgFunction(candidate any) ActionHandler {
 	if fn, ok := candidate.(func() any); ok {
-		return func(ctx context.Context, req *Request, res ResponseWriter) error {
-			result := fn()
-			return res.SendSuccess(result)
+		return func(ctx context.Context, req *Request) (any, error) {
+			return fn(), nil
 		}
 	}
 	return nil
@@ -271,12 +274,8 @@ func (r *Router) adaptNoArgFunction(candidate any) ActionHandler {
 // adaptNoArgWithErrorFunction adapts func() (any, error)
 func (r *Router) adaptNoArgWithErrorFunction(candidate any) ActionHandler {
 	if fn, ok := candidate.(func() (any, error)); ok {
-		return func(ctx context.Context, req *Request, res ResponseWriter) error {
-			result, err := fn()
-			if err != nil {
-				return res.SendError("SERVICE_UNAVAILABLE", err.Error())
-			}
-			return res.SendSuccess(result)
+		return func(ctx context.Context, req *Request) (any, error) {
+			return fn()
 		}
 	}
 	return nil
@@ -285,9 +284,8 @@ func (r *Router) adaptNoArgWithErrorFunction(candidate any) ActionHandler {
 // adaptSingleArgFunction adapts func(any) any
 func (r *Router) adaptSingleArgFunction(candidate any) ActionHandler {
 	if fn, ok := candidate.(func(any) any); ok {
-		return func(ctx context.Context, req *Request, res ResponseWriter) error {
-			result := fn(req.Payload)
-			return res.SendSuccess(result)
+		return func(ctx context.Context, req *Request) (any, error) {
+			return fn(req.Payload), nil
 		}
 	}
 	return nil
@@ -296,12 +294,8 @@ func (r *Router) adaptSingleArgFunction(candidate any) ActionHandler {
 // adaptSingleArgWithErrorFunction adapts func(any) (any, error)
 func (r *Router) adaptSingleArgWithErrorFunction(candidate any) ActionHandler {
 	if fn, ok := candidate.(func(any) (any, error)); ok {
-		return func(ctx context.Context, req *Request, res ResponseWriter) error {
-			result, err := fn(req.Payload)
-			if err != nil {
-				return res.SendError("SERVICE_UNAVAILABLE", err.Error())
-			}
-			return res.SendSuccess(result)
+		return func(ctx context.Context, req *Request) (any, error) {
+			return fn(req.Payload)
 		}
 	}
 	return nil
