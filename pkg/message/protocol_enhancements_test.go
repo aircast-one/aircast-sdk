@@ -340,17 +340,17 @@ func TestProtocolEnhancements_BackwardCompatibility(t *testing.T) {
 			{
 				name:        "request",
 				messageType: TypeRequest,
-				json:        `{"type": "request", "action": "test", "request_id": "123", "source": "client", "destination": "device"}`,
+				json:        `{"type": "request", "action": "test", "request_id": "123", "source": "web", "destination": "device"}`,
 			},
 			{
 				name:        "response",
 				messageType: TypeResponse,
-				json:        `{"type": "response", "action": "test", "reply_to": "123", "source": "device", "destination": "client"}`,
+				json:        `{"type": "response", "action": "test", "reply_to": "123", "source": "device", "destination": "web"}`,
 			},
 			{
 				name:        "error",
 				messageType: TypeError,
-				json:        `{"type": "error", "action": "test", "reply_to": "123", "error": {"code": "ERR", "message": "error"}, "source": "api", "destination": "client"}`,
+				json:        `{"type": "error", "action": "test", "reply_to": "123", "error": {"code": "ERR", "message": "error"}, "source": "api", "destination": "web"}`,
 			},
 			{
 				name:        "event",

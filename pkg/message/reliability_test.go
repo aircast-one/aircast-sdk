@@ -141,10 +141,11 @@ func TestMessageReliability(t *testing.T) {
 		// Send messages
 		for i := 0; i < numMessages; i++ {
 			msg := map[string]any{
-				"type":       TypeRequest,
-				"action":     "test_action",
-				"source":     SystemDevice,
-				"request_id": string(rune(i)),
+				"type":        TypeRequest,
+				"action":      "test_action",
+				"source":      SystemDevice,
+				"destination": DestinationAPI,
+				"request_id":  string(rune(i)),
 			}
 			data, _ := json.Marshal(msg)
 			conn.msgCh <- data
@@ -183,10 +184,11 @@ func TestMessageReliability(t *testing.T) {
 		const numMessages = 12000
 		for i := 0; i < numMessages; i++ {
 			msg := map[string]any{
-				"type":       TypeRequest,
-				"action":     "overflow_test",
-				"source":     SystemDevice,
-				"request_id": string(rune(i)),
+				"type":        TypeRequest,
+				"action":      "overflow_test",
+				"source":      SystemDevice,
+				"destination": DestinationAPI,
+				"request_id":  string(rune(i)),
 			}
 			data, _ := json.Marshal(msg)
 
@@ -235,10 +237,11 @@ func TestMessageReliability(t *testing.T) {
 
 		// Send a message
 		msg := map[string]any{
-			"type":       TypeRequest,
-			"action":     "test_stuck",
-			"source":     SystemDevice,
-			"request_id": "req-stuck",
+			"type":        TypeRequest,
+			"action":      "test_stuck",
+			"source":      SystemDevice,
+			"destination": DestinationAPI,
+			"request_id":  "req-stuck",
 		}
 		data, _ := json.Marshal(msg)
 		conn.msgCh <- data
@@ -397,10 +400,11 @@ func TestMessageChannelDeadlock(t *testing.T) {
 	// Fill the message channel
 	for i := 0; i < 600; i++ { // More than buffer size
 		msg := map[string]any{
-			"type":       TypeRequest,
-			"action":     "deadlock_test",
-			"source":     SystemDevice,
-			"request_id": string(rune(i)),
+			"type":        TypeRequest,
+			"action":      "deadlock_test",
+			"source":      SystemDevice,
+			"destination": DestinationAPI,
+			"request_id":  string(rune(i)),
 		}
 		data, _ := json.Marshal(msg)
 
@@ -478,10 +482,11 @@ func TestMemoryLeaks(t *testing.T) {
 
 		// Receive message
 		testMsg := map[string]any{
-			"type":       TypeRequest,
-			"action":     "memory_test",
-			"source":     SystemDevice,
-			"request_id": string(rune(i)),
+			"type":        TypeRequest,
+			"action":      "memory_test",
+			"source":      SystemDevice,
+			"destination": DestinationAPI,
+			"request_id":  string(rune(i)),
 		}
 		data, _ := json.Marshal(testMsg)
 		conn.msgCh <- data
@@ -539,10 +544,11 @@ func BenchmarkMessageReliability(b *testing.B) {
 
 	// Prepare message
 	msg := map[string]any{
-		"type":       TypeRequest,
-		"action":     "bench_reliability",
-		"source":     SystemDevice,
-		"request_id": "req-bench",
+		"type":        TypeRequest,
+		"action":      "bench_reliability",
+		"source":      SystemDevice,
+		"destination": DestinationAPI,
+		"request_id":  "req-bench",
 	}
 	data, _ := json.Marshal(msg)
 

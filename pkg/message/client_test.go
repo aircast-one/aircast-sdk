@@ -96,10 +96,11 @@ func TestClient_Listen(t *testing.T) {
 
 		// Create and send a valid request message
 		reqMsg := map[string]any{
-			"type":       TypeRequest,
-			"action":     "test_action",
-			"source":     SystemDevice,
-			"request_id": "req-123",
+			"type":        TypeRequest,
+			"action":      "test_action",
+			"source":      SystemDevice,
+			"destination": DestinationAPI,
+			"request_id":  "req-123",
 		}
 
 		msgBytes, _ := json.Marshal(reqMsg)

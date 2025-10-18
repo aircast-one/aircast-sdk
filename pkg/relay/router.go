@@ -125,7 +125,7 @@ func (r *Router) ProcessRequest(ctx context.Context, m message.RequestMessage) e
 	r.logger.WithFields(map[string]any{
 		"action":     m.Action,
 		"request_id": m.RequestID,
-		"session_id": m.ChannelID,
+		"channel_id": m.ChannelID,
 		"source":     m.Source,
 	}).Debug("Processing request message")
 

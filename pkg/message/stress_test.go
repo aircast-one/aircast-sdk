@@ -108,10 +108,11 @@ func TestHighVolumeMessageProcessing(t *testing.T) {
 	// Send high volume of messages
 	for i := range numMessages {
 		msg := map[string]any{
-			"type":    TypeEvent,
-			"action":  "high_volume_test",
-			"source":  SystemDevice,
-			"payload": map[string]int{"sequence": i},
+			"type":        TypeEvent,
+			"action":      "high_volume_test",
+			"source":      SystemDevice,
+			"destination": DestinationWeb,
+			"payload":     map[string]int{"sequence": i},
 		}
 		data, _ := json.Marshal(msg)
 
@@ -230,10 +231,11 @@ func TestConcurrentClientsStress(t *testing.T) {
 
 				// Send test message to self
 				testMsg := map[string]any{
-					"type":    TypeEvent,
-					"action":  "self_test",
-					"source":  SystemDevice,
-					"payload": map[string]int{"client": clientID, "seq": j},
+					"type":        TypeEvent,
+					"action":      "self_test",
+					"source":      SystemDevice,
+					"destination": DestinationWeb,
+					"payload":     map[string]int{"client": clientID, "seq": j},
 				}
 				data, _ := json.Marshal(testMsg)
 				connections[clientID].msgCh <- data
@@ -310,11 +312,12 @@ func TestMemoryPressure(t *testing.T) {
 	const numLargeMessages = 100
 	for i := 0; i < numLargeMessages; i++ {
 		msg := map[string]any{
-			"type":       TypeRequest,
-			"action":     "memory_pressure_test",
-			"source":     SystemDevice,
-			"request_id": fmt.Sprintf("req_%d", i),
-			"payload":    largePayload,
+			"type":        TypeRequest,
+			"action":      "memory_pressure_test",
+			"source":      SystemDevice,
+			"destination": DestinationAPI,
+			"request_id":  fmt.Sprintf("req_%d", i),
+			"payload":     largePayload,
 		}
 		data, _ := json.Marshal(msg)
 
@@ -401,9 +404,10 @@ func TestNetworkSimulation(t *testing.T) {
 
 				// Send test message
 				testMsg := map[string]any{
-					"type":   TypeEvent,
-					"action": "network_test",
-					"source": SystemDevice,
+					"type":        TypeEvent,
+					"action":      "network_test",
+					"source":      SystemDevice,
+					"destination": DestinationWeb,
 				}
 				data, _ := json.Marshal(testMsg)
 				conn.msgCh <- data
@@ -528,9 +532,10 @@ func TestResourceExhaustion(t *testing.T) {
 	// Fast producer
 	for range numMessages {
 		msg := map[string]any{
-			"type":   TypeEvent,
-			"action": "resource_exhaustion",
-			"source": SystemDevice,
+			"type":        TypeEvent,
+			"action":      "resource_exhaustion",
+			"source":      SystemDevice,
+			"destination": DestinationWeb,
 		}
 		data, _ := json.Marshal(msg)
 

@@ -14,6 +14,7 @@ func TestUnmarshalMessage(t *testing.T) {
 			"type": "request",
 			"action": "get_device",
 			"source": "api",
+			"destination": "device",
 			"request_id": "req-123",
 			"channel_id": "channel-456",
 			"payload": {"device_id": "device-789"}
@@ -38,6 +39,7 @@ func TestUnmarshalMessage(t *testing.T) {
 			"type": "response",
 			"action": "get_device",
 			"source": "device",
+			"destination": "web",
 			"channel_id": "channel-456",
 			"reply_to": "req-123",
 			"payload": {"status": "success"}
@@ -62,6 +64,7 @@ func TestUnmarshalMessage(t *testing.T) {
 			"type": "error",
 			"action": "get_device",
 			"source": "device",
+			"destination": "web",
 			"channel_id": "channel-456",
 			"reply_to": "req-123",
 			"error": {
@@ -92,6 +95,7 @@ func TestUnmarshalMessage(t *testing.T) {
 			"type": "event",
 			"action": "device_connected",
 			"source": "device",
+			"destination": "web",
 			"channel_id": "channel-456",
 			"payload": {"device_id": "device-789", "timestamp": "2023-01-01T00:00:00Z"}
 		}`
@@ -192,7 +196,7 @@ func TestUnmarshalMessage(t *testing.T) {
 		msg, err := UnmarshalMessage([]byte(data))
 		assert.Error(t, err)
 		assert.Nil(t, msg)
-		assert.Contains(t, err.Error(), "response must include 'reply_to' field")
+		assert.Contains(t, err.Error(), "reply_to")
 	})
 
 	t.Run("error missing reply_to", func(t *testing.T) {
@@ -206,7 +210,7 @@ func TestUnmarshalMessage(t *testing.T) {
 		msg, err := UnmarshalMessage([]byte(data))
 		assert.Error(t, err)
 		assert.Nil(t, msg)
-		assert.Contains(t, err.Error(), "error must include 'reply_to' field")
+		assert.Contains(t, err.Error(), "reply_to")
 	})
 
 	t.Run("error missing error field", func(t *testing.T) {
@@ -228,6 +232,7 @@ func TestUnmarshalMessage(t *testing.T) {
 			"type": "request",
 			"action": "test",
 			"source": "api",
+			"destination": "device",
 			"request_id": "123"
 		}`
 
@@ -249,6 +254,7 @@ func TestUnmarshalMessage(t *testing.T) {
 			"type": "response",
 			"action": "test",
 			"source": "device",
+			"destination": "web",
 			"reply_to": "123"
 		}`
 
@@ -270,6 +276,7 @@ func TestUnmarshalMessage(t *testing.T) {
 			"type": "error",
 			"action": "test",
 			"source": "api",
+			"destination": "web",
 			"reply_to": "123",
 			"error": {"code": "ERR", "message": "error"}
 		}`
@@ -292,7 +299,8 @@ func TestUnmarshalMessage(t *testing.T) {
 		data := `{
 			"type": "event",
 			"action": "test",
-			"source": "device"
+			"source": "device",
+			"destination": "web"
 		}`
 
 		msg, err := UnmarshalMessage([]byte(data))
@@ -495,6 +503,7 @@ func TestUnmarshalMessageEdgeCases(t *testing.T) {
 			"type": "request",
 			"action": "complex_action",
 			"source": "api",
+			"destination": "device",
 			"request_id": "req-complex",
 			"payload": {
 				"nested": {
@@ -539,11 +548,12 @@ func TestUnmarshalMessageEdgeCases(t *testing.T) {
 		}
 
 		msg := map[string]any{
-			"type":       TypeRequest,
-			"action":     "large_action",
-			"source":     SystemDevice,
-			"request_id": "req-large",
-			"payload":    largeData,
+			"type":        TypeRequest,
+			"action":      "large_action",
+			"source":      SystemDevice,
+			"destination": DestinationAPI,
+			"request_id":  "req-large",
+			"payload":     largeData,
 		}
 
 		data, err := json.Marshal(msg)
@@ -563,6 +573,7 @@ func TestUnmarshalMessageEdgeCases(t *testing.T) {
 			"type": "request",
 			"action": "test\naction\twith\rspecial\"characters",
 			"source": "device",
+			"destination": "api",
 			"request_id": "req-123",
 			"payload": {"field": "value with 'quotes' and \"double quotes\""}
 		}`
@@ -581,6 +592,7 @@ func TestUnmarshalMessageEdgeCases(t *testing.T) {
 			"type": "event",
 			"action": "unicode_test",
 			"source": "api",
+			"destination": "web",
 			"payload": {"emoji": "🚀", "chinese": "你好", "arabic": "مرحبا"}
 		}`
 
@@ -596,5 +608,314 @@ func TestUnmarshalMessageEdgeCases(t *testing.T) {
 		assert.Equal(t, "🚀", payload["emoji"])
 		assert.Equal(t, "你好", payload["chinese"])
 		assert.Equal(t, "مرحبا", payload["arabic"])
+	})
+}
+
+func TestMessageValidation(t *testing.T) {
+	t.Run("request with invalid source", func(t *testing.T) {
+		data := `{
+			"type": "request",
+			"action": "test",
+			"source": "invalid_source",
+			"destination": "device",
+			"request_id": "123"
+		}`
+
+		msg, err := UnmarshalMessage([]byte(data))
+		assert.Error(t, err)
+		assert.Nil(t, msg)
+		assert.Contains(t, err.Error(), "not a valid source")
+	})
+
+	t.Run("request with missing source", func(t *testing.T) {
+		data := `{
+			"type": "request",
+			"action": "test",
+			"destination": "device",
+			"request_id": "123"
+		}`
+
+		msg, err := UnmarshalMessage([]byte(data))
+		assert.Error(t, err)
+		assert.Nil(t, msg)
+		assert.Contains(t, err.Error(), "missing required 'source' field")
+	})
+
+	t.Run("request with invalid destination", func(t *testing.T) {
+		data := `{
+			"type": "request",
+			"action": "test",
+			"source": "api",
+			"destination": "invalid_dest",
+			"request_id": "123"
+		}`
+
+		msg, err := UnmarshalMessage([]byte(data))
+		assert.Error(t, err)
+		assert.Nil(t, msg)
+		assert.Contains(t, err.Error(), "not a valid destination")
+	})
+
+	t.Run("request with missing destination", func(t *testing.T) {
+		data := `{
+			"type": "request",
+			"action": "test",
+			"source": "api",
+			"request_id": "123"
+		}`
+
+		msg, err := UnmarshalMessage([]byte(data))
+		assert.Error(t, err)
+		assert.Nil(t, msg)
+		assert.Contains(t, err.Error(), "missing required 'destination' field")
+	})
+
+	t.Run("request with empty action", func(t *testing.T) {
+		data := `{
+			"type": "request",
+			"action": "",
+			"source": "api",
+			"destination": "device",
+			"request_id": "123"
+		}`
+
+		msg, err := UnmarshalMessage([]byte(data))
+		assert.Error(t, err)
+		assert.Nil(t, msg)
+		assert.Contains(t, err.Error(), "missing required 'action' field")
+	})
+
+	t.Run("request with empty request_id", func(t *testing.T) {
+		data := `{
+			"type": "request",
+			"action": "test",
+			"source": "api",
+			"destination": "device",
+			"request_id": ""
+		}`
+
+		msg, err := UnmarshalMessage([]byte(data))
+		assert.Error(t, err)
+		assert.Nil(t, msg)
+		assert.Contains(t, err.Error(), "missing required 'request_id' field")
+	})
+
+	t.Run("response with invalid source", func(t *testing.T) {
+		data := `{
+			"type": "response",
+			"action": "test",
+			"source": "bad_source",
+			"destination": "web",
+			"reply_to": "123"
+		}`
+
+		msg, err := UnmarshalMessage([]byte(data))
+		assert.Error(t, err)
+		assert.Nil(t, msg)
+		assert.Contains(t, err.Error(), "not a valid source")
+	})
+
+	t.Run("response with missing destination", func(t *testing.T) {
+		data := `{
+			"type": "response",
+			"action": "test",
+			"source": "device",
+			"reply_to": "123"
+		}`
+
+		msg, err := UnmarshalMessage([]byte(data))
+		assert.Error(t, err)
+		assert.Nil(t, msg)
+		assert.Contains(t, err.Error(), "missing required 'destination' field")
+	})
+
+	t.Run("response with empty reply_to", func(t *testing.T) {
+		data := `{
+			"type": "response",
+			"action": "test",
+			"source": "device",
+			"destination": "web",
+			"reply_to": ""
+		}`
+
+		msg, err := UnmarshalMessage([]byte(data))
+		assert.Error(t, err)
+		assert.Nil(t, msg)
+		assert.Contains(t, err.Error(), "reply_to")
+	})
+
+	t.Run("error with missing error.code", func(t *testing.T) {
+		data := `{
+			"type": "error",
+			"action": "test",
+			"source": "device",
+			"destination": "web",
+			"reply_to": "123",
+			"error": {"message": "error message"}
+		}`
+
+		msg, err := UnmarshalMessage([]byte(data))
+		assert.Error(t, err)
+		assert.Nil(t, msg)
+		assert.Contains(t, err.Error(), "error.code")
+	})
+
+	t.Run("error with empty error.code", func(t *testing.T) {
+		data := `{
+			"type": "error",
+			"action": "test",
+			"source": "device",
+			"destination": "web",
+			"reply_to": "123",
+			"error": {"code": "", "message": "error message"}
+		}`
+
+		msg, err := UnmarshalMessage([]byte(data))
+		assert.Error(t, err)
+		assert.Nil(t, msg)
+		assert.Contains(t, err.Error(), "error.code")
+	})
+
+	t.Run("error with missing error.message", func(t *testing.T) {
+		data := `{
+			"type": "error",
+			"action": "test",
+			"source": "device",
+			"destination": "web",
+			"reply_to": "123",
+			"error": {"code": "ERR_CODE"}
+		}`
+
+		msg, err := UnmarshalMessage([]byte(data))
+		assert.Error(t, err)
+		assert.Nil(t, msg)
+		assert.Contains(t, err.Error(), "error.message")
+	})
+
+	t.Run("error with empty error.message", func(t *testing.T) {
+		data := `{
+			"type": "error",
+			"action": "test",
+			"source": "device",
+			"destination": "web",
+			"reply_to": "123",
+			"error": {"code": "ERR_CODE", "message": ""}
+		}`
+
+		msg, err := UnmarshalMessage([]byte(data))
+		assert.Error(t, err)
+		assert.Nil(t, msg)
+		assert.Contains(t, err.Error(), "error.message")
+	})
+
+	t.Run("error with invalid error field type", func(t *testing.T) {
+		data := `{
+			"type": "error",
+			"action": "test",
+			"source": "device",
+			"destination": "web",
+			"reply_to": "123",
+			"error": "not an object"
+		}`
+
+		msg, err := UnmarshalMessage([]byte(data))
+		assert.Error(t, err)
+		assert.Nil(t, msg)
+		assert.Contains(t, err.Error(), "error must include 'error' field as an object")
+	})
+
+	t.Run("event with missing source", func(t *testing.T) {
+		data := `{
+			"type": "event",
+			"action": "test",
+			"destination": "web"
+		}`
+
+		msg, err := UnmarshalMessage([]byte(data))
+		assert.Error(t, err)
+		assert.Nil(t, msg)
+		assert.Contains(t, err.Error(), "missing required 'source' field")
+	})
+
+	t.Run("event with missing destination", func(t *testing.T) {
+		data := `{
+			"type": "event",
+			"action": "test",
+			"source": "device"
+		}`
+
+		msg, err := UnmarshalMessage([]byte(data))
+		assert.Error(t, err)
+		assert.Nil(t, msg)
+		assert.Contains(t, err.Error(), "missing required 'destination' field")
+	})
+
+	t.Run("will with missing destination", func(t *testing.T) {
+		data := `{
+			"type": "will",
+			"action": "disconnect"
+		}`
+
+		msg, err := UnmarshalMessage([]byte(data))
+		assert.Error(t, err)
+		assert.Nil(t, msg)
+		assert.Contains(t, err.Error(), "missing required 'destination' field")
+	})
+
+	t.Run("will with invalid destination", func(t *testing.T) {
+		data := `{
+			"type": "will",
+			"action": "disconnect",
+			"destination": "invalid"
+		}`
+
+		msg, err := UnmarshalMessage([]byte(data))
+		assert.Error(t, err)
+		assert.Nil(t, msg)
+		assert.Contains(t, err.Error(), "not a valid destination")
+	})
+
+	t.Run("valid request with all destinations", func(t *testing.T) {
+		destinations := []string{DestinationWeb, DestinationAPI, DestinationDevice, DestinationBroadcast}
+
+		for _, dest := range destinations {
+			data := `{
+				"type": "request",
+				"action": "test",
+				"source": "api",
+				"destination": "` + dest + `",
+				"request_id": "123"
+			}`
+
+			msg, err := UnmarshalMessage([]byte(data))
+			assert.NoError(t, err, "destination %s should be valid", dest)
+			require.NotNil(t, msg)
+
+			req, ok := msg.(RequestMessage)
+			require.True(t, ok)
+			assert.Equal(t, dest, req.Destination)
+		}
+	})
+
+	t.Run("valid request with all sources", func(t *testing.T) {
+		sources := []string{SystemDevice, SystemAPI, SystemWeb}
+
+		for _, src := range sources {
+			data := `{
+				"type": "request",
+				"action": "test",
+				"source": "` + src + `",
+				"destination": "device",
+				"request_id": "123"
+			}`
+
+			msg, err := UnmarshalMessage([]byte(data))
+			assert.NoError(t, err, "source %s should be valid", src)
+			require.NotNil(t, msg)
+
+			req, ok := msg.(RequestMessage)
+			require.True(t, ok)
+			assert.Equal(t, src, req.Source)
+		}
 	})
 }
