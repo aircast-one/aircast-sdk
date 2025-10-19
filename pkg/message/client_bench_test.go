@@ -1,7 +1,6 @@
 package message
 
 import (
-	"context"
 	"encoding/json"
 	"sync"
 	"testing"
@@ -93,28 +92,28 @@ func BenchmarkClientSend(b *testing.B) {
 	b.Run("Request", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_ = client.Send(requestMsg, nil)
+			_ = client.Send(requestMsg)
 		}
 	})
 
 	b.Run("Response", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_ = client.Send(responseMsg, nil)
+			_ = client.Send(responseMsg)
 		}
 	})
 
 	b.Run("Error", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_ = client.Send(errorMsg, nil)
+			_ = client.Send(errorMsg)
 		}
 	})
 
 	b.Run("Event", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			_ = client.Send(eventMsg, nil)
+			_ = client.Send(eventMsg)
 		}
 	})
 }
@@ -130,7 +129,6 @@ func BenchmarkClientSendWithChannel(b *testing.B) {
 	}
 	client := NewClient(logger, conn, config)
 
-	channelID := ChannelID("channel-bench")
 	msg := RequestMessage{
 		Action:    "benchmark_action",
 		Source:    SystemDevice,
@@ -140,7 +138,7 @@ func BenchmarkClientSendWithChannel(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = client.SendMessageToChannel(channelID, msg)
+		_ = client.Send(msg)
 	}
 }
 
@@ -163,7 +161,7 @@ func BenchmarkClientSendParallel(b *testing.B) {
 
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_ = client.Send(msg, nil)
+			_ = client.Send(msg)
 		}
 	})
 }
@@ -179,8 +177,7 @@ func BenchmarkClientListen(b *testing.B) {
 	}
 	client := NewClient(logger, conn, config)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 
 	// Start listening
 	go func() {
@@ -240,7 +237,7 @@ func BenchmarkClientThroughput(b *testing.B) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < messagesPerGoroutine; j++ {
-				_ = client.Send(msg, nil)
+				_ = client.Send(msg)
 			}
 		}()
 	}
@@ -269,11 +266,11 @@ func BenchmarkClientSendAllocs(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = client.Send(msg, nil)
+		_ = client.Send(msg)
 	}
 }
 
-// Benchmark SendResponse helper method
+// Benchmark sending response messages
 func BenchmarkClientSendResponse(b *testing.B) {
 	logger := logrus.NewEntry(logrus.New())
 	logger.Logger.SetLevel(logrus.ErrorLevel)
@@ -284,22 +281,22 @@ func BenchmarkClientSendResponse(b *testing.B) {
 	}
 	client := NewClient(logger, conn, config).(*client)
 
-	req := &RequestMessage{
-		Action:    "benchmark_action",
-		Source:    SystemDevice,
-		RequestID: "req-bench",
-		ChannelID: "channel-bench",
+	resp := ResponseMessage{
+		Action:      "benchmark_action",
+		Source:      SystemAPI,
+		Destination: DestinationDevice,
+		RoomID:      "channel-bench",
+		Payload:     map[string]string{"status": "success"},
+		ReplyTo:     "req-bench",
 	}
-
-	payload := map[string]string{"status": "success"}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = client.SendResponse(req, payload)
+		_ = client.Send(resp)
 	}
 }
 
-// Benchmark SendError helper method
+// Benchmark sending error messages
 func BenchmarkClientSendError(b *testing.B) {
 	logger := logrus.NewEntry(logrus.New())
 	logger.Logger.SetLevel(logrus.ErrorLevel)
@@ -310,21 +307,21 @@ func BenchmarkClientSendError(b *testing.B) {
 	}
 	client := NewClient(logger, conn, config).(*client)
 
-	req := &RequestMessage{
-		Action:    "benchmark_action",
-		Source:    SystemDevice,
-		RequestID: "req-bench",
-		ChannelID: "channel-bench",
-	}
-
-	errResponse := ErrorResponse{
-		Code:    "BENCH_ERROR",
-		Message: "Benchmark error",
+	errMsg := ErrorMessage{
+		Action:      "benchmark_action",
+		Source:      SystemAPI,
+		Destination: DestinationDevice,
+		RoomID:      "channel-bench",
+		Error: ErrorResponse{
+			Code:    "BENCH_ERROR",
+			Message: "Benchmark error",
+		},
+		ReplyTo: "req-bench",
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = client.SendErrorToChannel(req, errResponse)
+		_ = client.Send(errMsg)
 	}
 }
 
@@ -339,13 +336,16 @@ func BenchmarkClientSendEvent(b *testing.B) {
 	}
 	client := NewClient(logger, conn, config).(*client)
 
-	action := MessageAction("benchmark_event")
-	payload := map[string]string{"event": "data"}
-	destination := DestinationWeb
-	channelID := ChannelID("channel-bench")
+	eventMsg := EventMessage{
+		Action:      "benchmark_event",
+		Source:      SystemDevice,
+		Destination: DestinationWeb,
+		RoomID:      "channel-bench",
+		Payload:     map[string]string{"event": "data"},
+	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = client.SendEventToChannel(action, payload, destination, channelID)
+		_ = client.Send(eventMsg)
 	}
 }

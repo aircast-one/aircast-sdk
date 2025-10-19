@@ -224,7 +224,7 @@ func TestConcurrentClientsStress(t *testing.T) {
 					},
 				}
 
-				err := c.Send(msg, nil)
+				err := c.Send(msg)
 				if err == nil {
 					atomic.AddInt64(&totalSent, 1)
 				}
@@ -397,7 +397,7 @@ func TestNetworkSimulation(t *testing.T) {
 					Payload: map[string]int{"seq": i},
 				}
 
-				err := client.Send(msg, nil)
+				err := client.Send(msg)
 				if err == nil {
 					atomic.AddInt64(&sent, 1)
 				}
@@ -474,7 +474,7 @@ func TestGoroutineStorm(t *testing.T) {
 					Payload: map[string]int{"goroutine": id, "op": j},
 				}
 
-				_ = client.Send(msg, nil)
+				_ = client.Send(msg)
 				atomic.AddInt64(&operations, 1)
 
 				// Small delay

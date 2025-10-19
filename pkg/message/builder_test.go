@@ -17,7 +17,7 @@ func TestRequestBuilder(t *testing.T) {
 			WithSource(SystemDevice).
 			WithDestination(DestinationAPI).
 			WithPayload(payload).
-			WithChannelID("channel-1").
+			WithRoomID("channel-1").
 			WithTraceContext(traceCtx).
 			Build()
 
@@ -26,7 +26,7 @@ func TestRequestBuilder(t *testing.T) {
 		assert.Equal(t, SystemDevice, req.Source)
 		assert.Equal(t, MessageSource(DestinationAPI), req.Destination)
 		assert.Equal(t, payload, req.Payload)
-		assert.Equal(t, "channel-1", req.ChannelID)
+		assert.Equal(t, "channel-1", req.RoomID)
 		assert.Equal(t, traceCtx, req.TraceContext)
 	})
 
@@ -58,7 +58,7 @@ func TestResponseBuilder(t *testing.T) {
 			WithDestination(DestinationWeb).
 			WithPayload(payload).
 			WithReplyTo("req-123").
-			WithChannelID("channel-1").
+			WithRoomID("channel-1").
 			WithTraceContext(traceCtx).
 			Build()
 
@@ -67,7 +67,7 @@ func TestResponseBuilder(t *testing.T) {
 		assert.Equal(t, DestinationWeb, resp.Destination)
 		assert.Equal(t, payload, resp.Payload)
 		assert.Equal(t, RequestID("req-123"), resp.ReplyTo)
-		assert.Equal(t, ChannelID("channel-1"), resp.ChannelID)
+		assert.Equal(t, RoomID("channel-1"), resp.RoomID)
 		assert.Equal(t, traceCtx, resp.TraceContext)
 	})
 
@@ -94,7 +94,7 @@ func TestEventBuilder(t *testing.T) {
 			WithSource(SystemDevice).
 			WithDestination(DestinationWeb).
 			WithPayload(payload).
-			WithChannelID("channel-1").
+			WithRoomID("channel-1").
 			WithTraceContext(traceCtx).
 			Build()
 
@@ -102,7 +102,7 @@ func TestEventBuilder(t *testing.T) {
 		assert.Equal(t, SystemDevice, event.Source)
 		assert.Equal(t, DestinationWeb, event.Destination)
 		assert.Equal(t, payload, event.Payload)
-		assert.Equal(t, ChannelID("channel-1"), event.ChannelID)
+		assert.Equal(t, RoomID("channel-1"), event.RoomID)
 		assert.Equal(t, traceCtx, event.TraceContext)
 	})
 
@@ -128,7 +128,7 @@ func TestErrorBuilder(t *testing.T) {
 			WithDestination(DestinationDevice).
 			WithDetails(details).
 			WithReplyTo("req-123").
-			WithChannelID("channel-1").
+			WithRoomID("channel-1").
 			WithTraceContext(traceCtx).
 			Build()
 
@@ -139,7 +139,7 @@ func TestErrorBuilder(t *testing.T) {
 		assert.Equal(t, "Invalid request", errMsg.Error.Message)
 		assert.Equal(t, details, errMsg.Error.Details)
 		assert.Equal(t, RequestID("req-123"), errMsg.ReplyTo)
-		assert.Equal(t, ChannelID("channel-1"), errMsg.ChannelID)
+		assert.Equal(t, RoomID("channel-1"), errMsg.RoomID)
 		assert.Equal(t, traceCtx, errMsg.TraceContext)
 	})
 
@@ -164,7 +164,7 @@ func TestMapBuilder(t *testing.T) {
 			WithSource(SystemWeb).
 			WithDestination(DestinationAPI).
 			WithPayload(map[string]any{"key": "value"}).
-			WithChannelID("channel-1").
+			WithRoomID("channel-1").
 			WithTimestamp(1234567890).
 			WithTraceContext(map[string]string{"traceparent": "00-123-456-01"}).
 			Build()
@@ -174,7 +174,7 @@ func TestMapBuilder(t *testing.T) {
 		assert.Equal(t, "req-123", msg["request_id"])
 		assert.Equal(t, SystemWeb, msg["source"])
 		assert.Equal(t, DestinationAPI, msg["destination"])
-		assert.Equal(t, "channel-1", msg["channel_id"])
+		assert.Equal(t, "channel-1", msg["room_id"])
 		assert.Equal(t, int64(1234567890), msg["timestamp"])
 
 		payload, ok := msg["payload"].(map[string]any)
@@ -239,7 +239,7 @@ func TestBuilderChaining(t *testing.T) {
 		assert.Equal(t, builder, builder.WithSource(SystemDevice))
 		assert.Equal(t, builder, builder.WithDestination(DestinationAPI))
 		assert.Equal(t, builder, builder.WithPayload(nil))
-		assert.Equal(t, builder, builder.WithChannelID("ch-1"))
+		assert.Equal(t, builder, builder.WithRoomID("ch-1"))
 		assert.Equal(t, builder, builder.WithTraceContext(nil))
 	})
 
@@ -249,7 +249,7 @@ func TestBuilderChaining(t *testing.T) {
 		assert.Equal(t, builder, builder.WithDestination(DestinationWeb))
 		assert.Equal(t, builder, builder.WithPayload(nil))
 		assert.Equal(t, builder, builder.WithReplyTo("123"))
-		assert.Equal(t, builder, builder.WithChannelID("ch-1"))
+		assert.Equal(t, builder, builder.WithRoomID("ch-1"))
 		assert.Equal(t, builder, builder.WithTraceContext(nil))
 	})
 
@@ -258,7 +258,7 @@ func TestBuilderChaining(t *testing.T) {
 		assert.Equal(t, builder, builder.WithSource(SystemDevice))
 		assert.Equal(t, builder, builder.WithDestination(DestinationBroadcast))
 		assert.Equal(t, builder, builder.WithPayload(nil))
-		assert.Equal(t, builder, builder.WithChannelID("ch-1"))
+		assert.Equal(t, builder, builder.WithRoomID("ch-1"))
 		assert.Equal(t, builder, builder.WithTraceContext(nil))
 	})
 
@@ -268,7 +268,7 @@ func TestBuilderChaining(t *testing.T) {
 		assert.Equal(t, builder, builder.WithDestination(DestinationDevice))
 		assert.Equal(t, builder, builder.WithDetails(nil))
 		assert.Equal(t, builder, builder.WithReplyTo("123"))
-		assert.Equal(t, builder, builder.WithChannelID("ch-1"))
+		assert.Equal(t, builder, builder.WithRoomID("ch-1"))
 		assert.Equal(t, builder, builder.WithTraceContext(nil))
 	})
 
@@ -279,7 +279,7 @@ func TestBuilderChaining(t *testing.T) {
 		assert.Equal(t, builder, builder.WithSource(SystemWeb))
 		assert.Equal(t, builder, builder.WithDestination(DestinationAPI))
 		assert.Equal(t, builder, builder.WithPayload(nil))
-		assert.Equal(t, builder, builder.WithChannelID("ch-1"))
+		assert.Equal(t, builder, builder.WithRoomID("ch-1"))
 		assert.Equal(t, builder, builder.WithTimestamp(123))
 		assert.Equal(t, builder, builder.WithError("CODE", "msg", nil))
 		assert.Equal(t, builder, builder.WithTraceContext(nil))

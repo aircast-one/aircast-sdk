@@ -117,7 +117,7 @@ func handleDeviceStatus(ctx context.Context, req *relay.Request, res relay.Respo
 		WithTraceContext(otel.InjectTraceContext(ctx)).  // Inject current span context
 		Build()
 
-	return client.Send(event, &channelID)
+	return client.Send(event)
 }
 ```
 

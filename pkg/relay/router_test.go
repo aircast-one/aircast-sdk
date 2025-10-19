@@ -16,34 +16,14 @@ type MockClient struct {
 	mock.Mock
 }
 
-func (m *MockClient) Send(msg any, sessionId *message.ChannelID) error {
-	args := m.Called(msg, sessionId)
-	return args.Error(0)
-}
-
-func (m *MockClient) SendMessageToChannel(id message.ChannelID, msg any) error {
-	args := m.Called(id, msg)
-	return args.Error(0)
-}
-
-func (m *MockClient) SendBroadcastMessage(msg any) error {
+func (m *MockClient) Send(msg any) error {
 	args := m.Called(msg)
 	return args.Error(0)
 }
 
-func (m *MockClient) SendResponse(req *message.RequestMessage, payload any) error {
-	args := m.Called(req, payload)
-	return args.Error(0)
-}
-
-func (m *MockClient) SendErrorToChannel(req *message.RequestMessage, payload message.ErrorResponse) error {
-	args := m.Called(req, payload)
-	return args.Error(0)
-}
-
-func (m *MockClient) SendEventToChannel(action message.MessageAction, payload any, destination message.MessageDestination, sessionID message.ChannelID) error {
-	args := m.Called(action, payload, destination, sessionID)
-	return args.Error(0)
+func (m *MockClient) GetSource() message.MessageSource {
+	args := m.Called()
+	return args.Get(0).(message.MessageSource)
 }
 
 func (m *MockClient) Listen(ctx context.Context) error {
@@ -186,7 +166,12 @@ func TestRouter_HandleRequest_WithGlobalMiddleware(t *testing.T) {
 func TestRouter_ProcessRequest_Success(t *testing.T) {
 	router, client := createTestRouter()
 
-	client.On("SendResponse", mock.AnythingOfType("*message.RequestMessage"), map[string]any{"result": "success"}).Return(nil)
+	// Mock GetSource and Send methods
+	client.On("GetSource").Return(message.SystemDevice)
+	client.On("Send", mock.MatchedBy(func(msg any) bool {
+		resp, ok := msg.(message.ResponseMessage)
+		return ok && resp.Action == "test.action" && resp.Payload.(map[string]any)["result"] == "success"
+	})).Return(nil)
 
 	handlerCalled := false
 	router.HandleRequest("test.action", func(ctx context.Context, req *Request) (any, error) {
@@ -197,7 +182,7 @@ func TestRouter_ProcessRequest_Success(t *testing.T) {
 	msg := message.RequestMessage{
 		Action:      "test.action",
 		RequestID:   "req-123",
-		ChannelID:   "session-123",
+		RoomID:      "session-123",
 		Source:      "web",
 		Destination: "device",
 		Payload:     map[string]any{"data": "test"},
@@ -212,14 +197,16 @@ func TestRouter_ProcessRequest_Success(t *testing.T) {
 func TestRouter_ProcessRequest_UnknownAction(t *testing.T) {
 	router, client := createTestRouter()
 
-	client.On("SendErrorToChannel", mock.AnythingOfType("*message.RequestMessage"), mock.MatchedBy(func(errResp message.ErrorResponse) bool {
-		return errResp.Code == "UNKNOWN_ACTION"
+	client.On("GetSource").Return(message.SystemDevice)
+	client.On("Send", mock.MatchedBy(func(msg any) bool {
+		errMsg, ok := msg.(message.ErrorMessage)
+		return ok && errMsg.Error.Code == "UNKNOWN_ACTION"
 	})).Return(nil)
 
 	msg := message.RequestMessage{
 		Action:      "unknown.action",
 		RequestID:   "req-123",
-		ChannelID:   "session-123",
+		RoomID:      "session-123",
 		Source:      "web",
 		Destination: "device",
 	}
@@ -232,14 +219,16 @@ func TestRouter_ProcessRequest_UnknownAction(t *testing.T) {
 func TestRouter_ProcessRequest_InvalidMessage(t *testing.T) {
 	router, client := createTestRouter()
 
-	client.On("SendErrorToChannel", mock.AnythingOfType("*message.RequestMessage"), mock.MatchedBy(func(errResp message.ErrorResponse) bool {
-		return errResp.Code == "INVALID_REQUEST"
+	client.On("GetSource").Return(message.SystemDevice)
+	client.On("Send", mock.MatchedBy(func(msg any) bool {
+		errMsg, ok := msg.(message.ErrorMessage)
+		return ok && errMsg.Error.Code == "INVALID_REQUEST"
 	})).Return(nil)
 
 	msg := message.RequestMessage{
 		Action:      "test.action",
 		RequestID:   "", // Missing required field
-		ChannelID:   "session-123",
+		RoomID:      "session-123",
 		Source:      "web",
 		Destination: "device",
 	}
@@ -252,8 +241,10 @@ func TestRouter_ProcessRequest_InvalidMessage(t *testing.T) {
 func TestRouter_ProcessRequest_HandlerError(t *testing.T) {
 	router, client := createTestRouter()
 
-	client.On("SendErrorToChannel", mock.AnythingOfType("*message.RequestMessage"), mock.MatchedBy(func(errResp message.ErrorResponse) bool {
-		return errResp.Code == "HANDLER_ERROR" && errResp.Message == "test error"
+	client.On("GetSource").Return(message.SystemDevice)
+	client.On("Send", mock.MatchedBy(func(msg any) bool {
+		errMsg, ok := msg.(message.ErrorMessage)
+		return ok && errMsg.Error.Code == "HANDLER_ERROR" && errMsg.Error.Message == "test error"
 	})).Return(nil)
 
 	router.HandleRequest("test.action", func(ctx context.Context, req *Request) (any, error) {
@@ -263,7 +254,7 @@ func TestRouter_ProcessRequest_HandlerError(t *testing.T) {
 	msg := message.RequestMessage{
 		Action:      "test.action",
 		RequestID:   "req-123",
-		ChannelID:   "session-123",
+		RoomID:      "session-123",
 		Source:      "web",
 		Destination: "device",
 	}
@@ -286,7 +277,7 @@ func TestRouter_HandleEvent_Registration(t *testing.T) {
 
 	msg := message.EventMessage{
 		Action:      "test.event",
-		ChannelID:   "session-123",
+		RoomID:      "session-123",
 		Source:      "web",
 		Destination: "device",
 		Payload:     map[string]any{"data": "test"},
@@ -302,7 +293,7 @@ func TestRouter_ProcessEvent_UnknownAction(t *testing.T) {
 
 	msg := message.EventMessage{
 		Action:      "unknown.event",
-		ChannelID:   "session-123",
+		RoomID:      "session-123",
 		Source:      "web",
 		Destination: "device",
 	}
@@ -321,7 +312,7 @@ func TestRouter_ProcessEvent_HandlerError(t *testing.T) {
 
 	msg := message.EventMessage{
 		Action:      "test.event",
-		ChannelID:   "session-123",
+		RoomID:      "session-123",
 		Source:      "web",
 		Destination: "device",
 	}
@@ -355,7 +346,7 @@ func TestRouter_UseEventMiddleware(t *testing.T) {
 
 	msg := message.EventMessage{
 		Action:      "test.event",
-		ChannelID:   "session-123",
+		RoomID:      "session-123",
 		Source:      "web",
 		Destination: "device",
 	}
@@ -372,7 +363,11 @@ func TestRouter_UseEventMiddleware(t *testing.T) {
 func TestRouter_AdaptSimpleHandlers(t *testing.T) {
 	router, client := createTestRouter()
 
-	client.On("SendResponse", mock.AnythingOfType("*message.RequestMessage"), "test result").Return(nil)
+	client.On("GetSource").Return(message.SystemDevice)
+	client.On("Send", mock.MatchedBy(func(msg any) bool {
+		resp, ok := msg.(message.ResponseMessage)
+		return ok && resp.Payload == "test result"
+	})).Return(nil)
 
 	// Test adapting func() any
 	router.HandleRequest("simple.noargs", func() any {
@@ -382,7 +377,7 @@ func TestRouter_AdaptSimpleHandlers(t *testing.T) {
 	msg := message.RequestMessage{
 		Action:      "simple.noargs",
 		RequestID:   "req-123",
-		ChannelID:   "session-123",
+		RoomID:      "session-123",
 		Source:      "web",
 		Destination: "device",
 	}

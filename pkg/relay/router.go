@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 
@@ -116,7 +117,7 @@ func (r *Router) ProcessRequest(ctx context.Context, m message.RequestMessage) e
 	r.logger.WithFields(map[string]any{
 		"action":     m.Action,
 		"request_id": m.RequestID,
-		"channel_id": m.ChannelID,
+		"room_id":    m.RoomID,
 		"source":     m.Source,
 	}).Debug("Processing request message")
 
@@ -137,18 +138,40 @@ func (r *Router) ProcessRequest(ctx context.Context, m message.RequestMessage) e
 	payload, err := handlerFunc(ctx, req)
 	if err != nil {
 		r.logger.WithError(err).WithField("action", req.Action).Error("Failed to handle request")
+
+		// Check if error is a HandlerError with custom error code
+		var handlerErr *HandlerError
+		if errors.As(err, &handlerErr) {
+			return r.sendError(&m, handlerErr.Code, handlerErr.Message)
+		}
+
+		// Default error code for non-HandlerError errors
 		return r.sendError(&m, "HANDLER_ERROR", err.Error())
 	}
 
 	r.logger.WithField("action", req.Action).Debug("Request handled successfully")
-	return r.client.SendResponse(&m, payload)
+	return r.client.Send(message.ResponseMessage{
+		Action:      m.Action,
+		Payload:     payload,
+		Source:      r.client.GetSource(),
+		Destination: message.SourceToDestination(m.Source),
+		RoomID:      m.RoomID,
+		ReplyTo:     m.RequestID,
+	})
 }
 
 // sendError sends an error response for a request
 func (r *Router) sendError(reqMsg *message.RequestMessage, code, msg string) error {
-	return r.client.SendErrorToChannel(reqMsg, message.ErrorResponse{
-		Code:    code,
-		Message: msg,
+	return r.client.Send(message.ErrorMessage{
+		Action:      reqMsg.Action,
+		Source:      r.client.GetSource(),
+		Destination: message.SourceToDestination(reqMsg.Source),
+		RoomID:      reqMsg.RoomID,
+		Error: message.ErrorResponse{
+			Code:    code,
+			Message: msg,
+		},
+		ReplyTo: reqMsg.RequestID,
 	})
 }
 
@@ -156,7 +179,7 @@ func (r *Router) sendError(reqMsg *message.RequestMessage, code, msg string) err
 func (r *Router) ProcessEvent(ctx context.Context, m message.EventMessage) error {
 	r.logger.WithFields(map[string]any{
 		"action":     m.Action,
-		"session_id": m.ChannelID,
+		"session_id": m.RoomID,
 		"source":     m.Source,
 	}).Debug("Processing event message")
 
@@ -171,7 +194,7 @@ func (r *Router) ProcessEvent(ctx context.Context, m message.EventMessage) error
 	// Create an EventRequest for consistent payload processing
 	eventReq := &EventRequest{
 		Action:       m.Action,
-		SessionID:    m.ChannelID,
+		SessionID:    m.RoomID,
 		Payload:      m.Payload,
 		Source:       m.Source,
 		TraceContext: m.TraceContext, // Preserve W3C Trace Context for distributed tracing

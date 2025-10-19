@@ -16,7 +16,7 @@ func TestUnmarshalMessage(t *testing.T) {
 			"source": "api",
 			"destination": "device",
 			"request_id": "req-123",
-			"channel_id": "channel-456",
+			"room_id": "channel-456",
 			"payload": {"device_id": "device-789"}
 		}`
 
@@ -30,7 +30,7 @@ func TestUnmarshalMessage(t *testing.T) {
 		assert.Equal(t, "get_device", req.Action)
 		assert.Equal(t, SystemAPI, req.Source)
 		assert.Equal(t, "req-123", req.RequestID)
-		assert.Equal(t, "channel-456", req.ChannelID)
+		assert.Equal(t, "channel-456", req.RoomID)
 		assert.NotNil(t, req.Payload)
 	})
 
@@ -40,7 +40,7 @@ func TestUnmarshalMessage(t *testing.T) {
 			"action": "get_device",
 			"source": "device",
 			"destination": "web",
-			"channel_id": "channel-456",
+			"room_id": "channel-456",
 			"reply_to": "req-123",
 			"payload": {"status": "success"}
 		}`
@@ -54,7 +54,7 @@ func TestUnmarshalMessage(t *testing.T) {
 
 		assert.Equal(t, "get_device", resp.Action)
 		assert.Equal(t, SystemDevice, resp.Source)
-		assert.Equal(t, "channel-456", resp.ChannelID)
+		assert.Equal(t, "channel-456", resp.RoomID)
 		assert.Equal(t, "req-123", resp.ReplyTo)
 		assert.NotNil(t, resp.Payload)
 	})
@@ -65,7 +65,7 @@ func TestUnmarshalMessage(t *testing.T) {
 			"action": "get_device",
 			"source": "device",
 			"destination": "web",
-			"channel_id": "channel-456",
+			"room_id": "channel-456",
 			"reply_to": "req-123",
 			"error": {
 				"code": "DEVICE_NOT_FOUND",
@@ -83,7 +83,7 @@ func TestUnmarshalMessage(t *testing.T) {
 
 		assert.Equal(t, "get_device", errMsg.Action)
 		assert.Equal(t, SystemDevice, errMsg.Source)
-		assert.Equal(t, "channel-456", errMsg.ChannelID)
+		assert.Equal(t, "channel-456", errMsg.RoomID)
 		assert.Equal(t, "req-123", errMsg.ReplyTo)
 		assert.Equal(t, "DEVICE_NOT_FOUND", errMsg.Error.Code)
 		assert.Equal(t, "Device not found", errMsg.Error.Message)
@@ -96,7 +96,7 @@ func TestUnmarshalMessage(t *testing.T) {
 			"action": "device_connected",
 			"source": "device",
 			"destination": "web",
-			"channel_id": "channel-456",
+			"room_id": "channel-456",
 			"payload": {"device_id": "device-789", "timestamp": "2023-01-01T00:00:00Z"}
 		}`
 
@@ -109,7 +109,7 @@ func TestUnmarshalMessage(t *testing.T) {
 
 		assert.Equal(t, "device_connected", event.Action)
 		assert.Equal(t, SystemDevice, event.Source)
-		assert.Equal(t, "channel-456", event.ChannelID)
+		assert.Equal(t, "channel-456", event.RoomID)
 		assert.NotNil(t, event.Payload)
 	})
 
@@ -245,7 +245,7 @@ func TestUnmarshalMessage(t *testing.T) {
 		assert.Equal(t, "test", req.Action)
 		assert.Equal(t, "api", req.Source)
 		assert.Equal(t, "123", req.RequestID)
-		assert.Empty(t, req.ChannelID)
+		assert.Empty(t, req.RoomID)
 		assert.Nil(t, req.Payload)
 	})
 
@@ -267,7 +267,7 @@ func TestUnmarshalMessage(t *testing.T) {
 		assert.Equal(t, "test", resp.Action)
 		assert.Equal(t, "device", resp.Source)
 		assert.Equal(t, "123", resp.ReplyTo)
-		assert.Empty(t, resp.ChannelID)
+		assert.Empty(t, resp.RoomID)
 		assert.Nil(t, resp.Payload)
 	})
 
@@ -292,7 +292,7 @@ func TestUnmarshalMessage(t *testing.T) {
 		assert.Equal(t, "123", errMsg.ReplyTo)
 		assert.Equal(t, "ERR", errMsg.Error.Code)
 		assert.Equal(t, "error", errMsg.Error.Message)
-		assert.Empty(t, errMsg.ChannelID)
+		assert.Empty(t, errMsg.RoomID)
 	})
 
 	t.Run("minimal valid event", func(t *testing.T) {
@@ -311,7 +311,7 @@ func TestUnmarshalMessage(t *testing.T) {
 		require.True(t, ok)
 		assert.Equal(t, "test", event.Action)
 		assert.Equal(t, "device", event.Source)
-		assert.Empty(t, event.ChannelID)
+		assert.Empty(t, event.RoomID)
 		assert.Nil(t, event.Payload)
 	})
 }

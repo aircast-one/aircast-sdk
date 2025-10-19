@@ -22,14 +22,8 @@ type Client interface {
 	// Listen starts listening for incoming messages
 	Listen(ctx context.Context) error
 
-	// SendMessageToChannel sends direct message
-	SendMessageToChannel(id ChannelID, msg any) error
-
-	// SendBroadcastMessage sends a broadcast message
-	SendBroadcastMessage(msg any) error
-
 	// Send sends a message
-	Send(msg any, sessionId *ChannelID) error
+	Send(msg any) error
 
 	// Close closes the client connection
 	Close() error
@@ -40,11 +34,8 @@ type Client interface {
 	// ReadMessage returns a channel of incoming parsed messages
 	ReadMessage() <-chan any
 
-	SendResponse(req *RequestMessage, payload any) error
-
-	SendErrorToChannel(req *RequestMessage, payload ErrorResponse) error
-
-	SendEventToChannel(action MessageAction, payload any, destination MessageDestination, sessionID ChannelID) error
+	// GetSource returns the message source for this client
+	GetSource() MessageSource
 
 	// RegisterWill registers a Last Will message to be sent if connection closes unexpectedly
 	RegisterWill(will WillMessage) error
@@ -66,33 +57,30 @@ type Connection interface {
 }
 
 type ClientConfig struct {
-	Source      MessageSource
-	PrintConfig *PrintConfig
+	Source MessageSource
 }
 
 // client implements the Client interface
 type client struct {
-	conn        Connection
-	msgCh       chan GenericMessage
-	logger      *log.Entry
-	closed      bool
-	closeMutex  sync.Mutex
-	closeOnce   sync.Once
-	source      MessageSource
-	printConfig *PrintConfig
+	conn       Connection
+	msgCh      chan GenericMessage
+	logger     *log.Entry
+	closed     bool
+	closeMutex sync.Mutex
+	closeOnce  sync.Once
+	source     MessageSource
 }
 
 // NewClient creates a new message client
 func NewClient(logger *log.Entry, conn Connection, config ClientConfig) Client {
 	return &client{
-		conn:        conn,
-		msgCh:       make(chan GenericMessage, 10000), // Much larger buffer for high throughput
-		logger:      logger.WithField("component", "message_client"),
-		closed:      false,
-		closeMutex:  sync.Mutex{},
-		closeOnce:   sync.Once{},
-		source:      config.Source,
-		printConfig: config.PrintConfig,
+		conn:       conn,
+		msgCh:      make(chan GenericMessage, 10000), // Much larger buffer for high throughput
+		logger:     logger.WithField("component", "message_client"),
+		closed:     false,
+		closeMutex: sync.Mutex{},
+		closeOnce:  sync.Once{},
+		source:     config.Source,
 	}
 }
 
@@ -143,9 +131,6 @@ func (c *client) Listen(ctx context.Context) error {
 				if c.logger.Logger.IsLevelEnabled(log.TraceLevel) {
 					c.logger.Trace("Message received and forwarded")
 				}
-				if c.printConfig != nil {
-					Print(msg, c.printConfig)
-				}
 			} else if !c.IsClosed() {
 				c.logger.Warn("GenericMessage channel full, dropping message")
 			}
@@ -185,31 +170,10 @@ func (c *client) safeSend(msg GenericMessage) bool {
 }
 
 // Send is a helper function that handles the common logic for sending messages
-func (c *client) Send(msg any, channelId *ChannelID) error {
+func (c *client) Send(msg any) error {
 	if c.IsClosed() {
 		return fmt.Errorf("client connection is closed")
 	}
-
-	// First add channelId to the message if provided
-	if channelId != nil {
-		switch m := msg.(type) {
-		case RequestMessage:
-			m.ChannelID = string(*channelId)
-			msg = m
-		case ResponseMessage:
-			m.ChannelID = *channelId
-			msg = m
-		case ErrorMessage:
-			m.ChannelID = *channelId
-			msg = m
-		case EventMessage:
-			m.ChannelID = *channelId
-			msg = m
-		}
-	}
-
-	// Log the message we're about to send
-	Print(msg, c.printConfig)
 
 	// Prepare envelope based on the message type
 	var envelope any
@@ -239,15 +203,6 @@ func (c *client) Send(msg any, channelId *ChannelID) error {
 			ErrorMessage: m,
 		}
 	case EventMessage:
-		// DEBUG: Log EventMessage before marshaling
-		c.logger.WithFields(log.Fields{
-			"action":      m.Action,
-			"destination": m.Destination,
-			"dest_len":    len(m.Destination),
-			"channel_id":  m.ChannelID,
-			"source":      m.Source,
-		}).Debug("[SDK] Marshaling EventMessage")
-
 		envelope = struct {
 			Type string `json:"type"`
 			EventMessage
@@ -281,17 +236,13 @@ func (c *client) Send(msg any, channelId *ChannelID) error {
 	return c.conn.SendMessage(data)
 }
 
-// SendMessageToChannel sends a message to a specific session
-func (c *client) SendMessageToChannel(channelID ChannelID, msg any) error {
-	return c.Send(msg, &channelID)
+// GetSource returns the message source for this client
+func (c *client) GetSource() MessageSource {
+	return c.source
 }
 
-func (c *client) SendBroadcastMessage(msg any) error {
-	return c.Send(msg, nil)
-}
-
-// sourceToDestination converts a MessageSource to the correct MessageDestination
-func sourceToDestination(source MessageSource) MessageDestination {
+// SourceToDestination converts a MessageSource to the correct MessageDestination
+func SourceToDestination(source MessageSource) MessageDestination {
 	switch source {
 	case SystemWeb:
 		return DestinationWeb
@@ -301,64 +252,8 @@ func sourceToDestination(source MessageSource) MessageDestination {
 		return DestinationAPI
 	default:
 		// For unknown sources, return as-is (will be validated by router)
-		return MessageDestination(source)
+		return source
 	}
-}
-
-func (c *client) SendResponse(req *RequestMessage, payload any) error {
-	return c.Send(ResponseMessage{
-		Action:      req.Action,
-		Payload:     payload,
-		Source:      c.source,
-		Destination: sourceToDestination(req.Source),
-		ChannelID:   req.ChannelID,
-		ReplyTo:     req.RequestID,
-	}, &req.ChannelID)
-}
-
-func (c *client) SendEventToChannel(action MessageAction, payload any, destination MessageDestination, channelID ChannelID) error {
-	return c.Send(EventMessage{
-		Action:      action,
-		Payload:     payload,
-		Source:      c.source,
-		Destination: destination,
-		ChannelID:   channelID,
-	}, &channelID)
-}
-
-// ExtractDestinationFromChannelID extracts the destination prefix from a channel ID
-// For example: "web:session-123" -> "web", "device:device-456" -> "device"
-// This is exported so QueuedClient can use it to build EventMessages correctly
-func ExtractDestinationFromChannelID(channelID ChannelID) MessageDestination {
-	// Handle empty or malformed channel IDs
-	if channelID == "" {
-		return DestinationBroadcast
-	}
-
-	// Split by colon to get the prefix
-	parts := []rune(channelID)
-	for i, r := range parts {
-		if r == ':' {
-			// If colon is at the beginning or prefix is empty, return broadcast
-			if i == 0 {
-				return DestinationBroadcast
-			}
-			return MessageDestination(string(parts[:i]))
-		}
-	}
-	// If no colon found, assume broadcast
-	return DestinationBroadcast
-}
-
-func (c *client) SendErrorToChannel(req *RequestMessage, errResponse ErrorResponse) error {
-	return c.Send(ErrorMessage{
-		Action:      req.Action,
-		Source:      c.source,
-		Destination: sourceToDestination(req.Source),
-		ChannelID:   req.ChannelID,
-		Error:       errResponse,
-		ReplyTo:     req.RequestID,
-	}, &req.ChannelID)
 }
 
 // RegisterWill registers a Last Will message to be sent if connection closes unexpectedly
@@ -368,9 +263,6 @@ func (c *client) RegisterWill(will WillMessage) error {
 	}
 
 	// Print the will message if logging is enabled
-	if c.printConfig != nil {
-		c.logger.WithField("will_action", will.Action).Debug("Registering Last Will")
-	}
 
 	// Prepare envelope for will message
 	envelope := struct {

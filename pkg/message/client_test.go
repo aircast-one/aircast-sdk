@@ -63,9 +63,6 @@ func TestNewClient(t *testing.T) {
 	conn := NewMockConnection()
 	config := ClientConfig{
 		Source: SystemDevice,
-		PrintConfig: &PrintConfig{
-			ShowPayload: true,
-		},
 	}
 
 	client := NewClient(logger, conn, config)
@@ -209,7 +206,7 @@ func TestClient_Send(t *testing.T) {
 			return envelope["type"] == TypeRequest && envelope["action"] == "test_action"
 		})).Return(nil)
 
-		err := client.Send(req, nil)
+		err := client.Send(req)
 		assert.NoError(t, err)
 		conn.AssertExpectations(t)
 	})
@@ -236,7 +233,7 @@ func TestClient_Send(t *testing.T) {
 			return envelope["type"] == TypeResponse && envelope["reply_to"] == "req-123"
 		})).Return(nil)
 
-		err := client.Send(resp, nil)
+		err := client.Send(resp)
 		assert.NoError(t, err)
 		conn.AssertExpectations(t)
 	})
@@ -266,7 +263,7 @@ func TestClient_Send(t *testing.T) {
 			return envelope["type"] == TypeError
 		})).Return(nil)
 
-		err := client.Send(errMsg, nil)
+		err := client.Send(errMsg)
 		assert.NoError(t, err)
 		conn.AssertExpectations(t)
 	})
@@ -292,7 +289,7 @@ func TestClient_Send(t *testing.T) {
 			return envelope["type"] == TypeEvent && envelope["action"] == "test_event"
 		})).Return(nil)
 
-		err := client.Send(event, nil)
+		err := client.Send(event)
 		assert.NoError(t, err)
 		conn.AssertExpectations(t)
 	})
@@ -306,20 +303,20 @@ func TestClient_Send(t *testing.T) {
 		}
 		client := NewClient(logger, conn, config)
 
-		channelID := ChannelID("channel-123")
 		req := RequestMessage{
 			Action:    "test_action",
 			Source:    SystemDevice,
 			RequestID: "req-123",
+			RoomID:    "channel-123",
 		}
 
 		conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
 			var envelope map[string]any
 			_ = json.Unmarshal(data, &envelope)
-			return envelope["channel_id"] == "channel-123"
+			return envelope["room_id"] == "channel-123"
 		})).Return(nil)
 
-		err := client.Send(req, &channelID)
+		err := client.Send(req)
 		assert.NoError(t, err)
 		conn.AssertExpectations(t)
 	})
@@ -342,7 +339,7 @@ func TestClient_Send(t *testing.T) {
 			RequestID: "req-123",
 		}
 
-		err := client.Send(req, nil)
+		err := client.Send(req)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "closed")
 	})
@@ -362,196 +359,10 @@ func TestClient_Send(t *testing.T) {
 			Field: "value",
 		}
 
-		err := client.Send(unsupportedMsg, nil)
+		err := client.Send(unsupportedMsg)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not supported")
 	})
-}
-
-func TestClient_SendMessageToChannel(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	conn := NewMockConnection()
-
-	config := ClientConfig{
-		Source: SystemDevice,
-	}
-	client := NewClient(logger, conn, config)
-
-	channelID := ChannelID("channel-123")
-	req := RequestMessage{
-		Action:    "test_action",
-		Source:    SystemDevice,
-		RequestID: "req-123",
-	}
-
-	conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
-		var envelope map[string]any
-		_ = json.Unmarshal(data, &envelope)
-		return envelope["channel_id"] == "channel-123"
-	})).Return(nil)
-
-	err := client.SendMessageToChannel(channelID, req)
-	assert.NoError(t, err)
-	conn.AssertExpectations(t)
-}
-
-func TestClient_SendBroadcastMessage(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	conn := NewMockConnection()
-
-	config := ClientConfig{
-		Source: SystemDevice,
-	}
-	client := NewClient(logger, conn, config)
-
-	event := EventMessage{
-		Action:  "broadcast_event",
-		Source:  SystemDevice,
-		Payload: map[string]string{"broadcast": "data"},
-	}
-
-	conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
-		var envelope map[string]any
-		_ = json.Unmarshal(data, &envelope)
-		// Broadcast messages should not have channel_id
-		_, hasChannelID := envelope["channel_id"]
-		return !hasChannelID || envelope["channel_id"] == ""
-	})).Return(nil)
-
-	err := client.SendBroadcastMessage(event)
-	assert.NoError(t, err)
-	conn.AssertExpectations(t)
-}
-
-func TestClient_SendResponse(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	conn := NewMockConnection()
-
-	config := ClientConfig{
-		Source: SystemAPI,
-	}
-	client := NewClient(logger, conn, config).(*client)
-
-	req := &RequestMessage{
-		Action:    "test_action",
-		Source:    SystemDevice,
-		RequestID: "req-123",
-		ChannelID: "channel-123",
-	}
-
-	payload := map[string]string{"status": "success"}
-
-	conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
-		var envelope map[string]any
-		_ = json.Unmarshal(data, &envelope)
-		return envelope["type"] == TypeResponse &&
-			envelope["action"] == "test_action" &&
-			envelope["reply_to"] == "req-123" &&
-			envelope["source"] == SystemAPI &&
-			envelope["channel_id"] == "channel-123"
-	})).Return(nil)
-
-	err := client.SendResponse(req, payload)
-	assert.NoError(t, err)
-	conn.AssertExpectations(t)
-}
-
-func TestClient_SendErrorToChannel(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	conn := NewMockConnection()
-
-	config := ClientConfig{
-		Source: SystemAPI,
-	}
-	client := NewClient(logger, conn, config).(*client)
-
-	req := &RequestMessage{
-		Action:    "test_action",
-		Source:    SystemDevice,
-		RequestID: "req-123",
-		ChannelID: "channel-123",
-	}
-
-	errResponse := ErrorResponse{
-		Code:    "TEST_ERROR",
-		Message: "Something went wrong",
-		Details: map[string]string{"field": "value"},
-	}
-
-	conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
-		var envelope map[string]any
-		_ = json.Unmarshal(data, &envelope)
-		errorField := envelope["error"].(map[string]any)
-		return envelope["type"] == TypeError &&
-			envelope["action"] == "test_action" &&
-			envelope["reply_to"] == "req-123" &&
-			envelope["source"] == SystemAPI &&
-			errorField["code"] == "TEST_ERROR"
-	})).Return(nil)
-
-	err := client.SendErrorToChannel(req, errResponse)
-	assert.NoError(t, err)
-	conn.AssertExpectations(t)
-}
-
-func TestClient_SendEventToChannel(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	conn := NewMockConnection()
-
-	config := ClientConfig{
-		Source: SystemDevice,
-	}
-	client := NewClient(logger, conn, config).(*client)
-
-	action := MessageAction("device_connected")
-	payload := map[string]string{"device_id": "device-123"}
-	destination := DestinationWeb
-	sessionID := ChannelID("session-123")
-
-	conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
-		var envelope map[string]any
-		_ = json.Unmarshal(data, &envelope)
-		return envelope["type"] == TypeEvent &&
-			envelope["action"] == "device_connected" &&
-			envelope["source"] == SystemDevice &&
-			envelope["destination"] == DestinationWeb &&
-			envelope["channel_id"] == "session-123"
-	})).Return(nil)
-
-	err := client.SendEventToChannel(action, payload, destination, sessionID)
-	assert.NoError(t, err)
-	conn.AssertExpectations(t)
-}
-
-func TestClient_SendEventToChannel_WithDestination(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	conn := NewMockConnection()
-
-	config := ClientConfig{
-		Source: SystemDevice,
-	}
-	client := NewClient(logger, conn, config).(*client)
-
-	action := MessageAction("device.session.ready")
-	payload := map[string]any{"test": "value"}
-	destination := DestinationWeb
-	channelID := ChannelID("web:test-session-123")
-
-	var capturedJSON map[string]any
-	conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
-		_ = json.Unmarshal(data, &capturedJSON)
-		return true
-	})).Return(nil)
-
-	err := client.SendEventToChannel(action, payload, destination, channelID)
-	assert.NoError(t, err)
-
-	// Check that destination field is set from the parameter
-	assert.Equal(t, string(DestinationWeb), capturedJSON["destination"], "Destination should be set from parameter")
-	assert.NotEmpty(t, capturedJSON["destination"], "Destination field must not be empty")
-	assert.Equal(t, "web:test-session-123", capturedJSON["channel_id"], "Channel ID should be preserved")
-
-	conn.AssertExpectations(t)
 }
 
 func TestClient_Close(t *testing.T) {
@@ -731,67 +542,63 @@ func TestClient_SourceToDestination(t *testing.T) {
 	client := NewClient(logger, conn, config).(*client)
 
 	t.Run("maps web source correctly", func(t *testing.T) {
-		req := &RequestMessage{
-			Action:    "test",
-			Source:    SystemWeb,
-			RequestID: "req-1",
-			ChannelID: "ch-1",
-		}
-
 		conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
 			var envelope map[string]any
 			_ = json.Unmarshal(data, &envelope)
 			return envelope["destination"] == DestinationWeb
 		})).Return(nil).Once()
 
-		err := client.SendResponse(req, map[string]string{"result": "ok"})
+		resp := ResponseMessage{
+			Action:      "test",
+			Source:      SystemAPI,
+			Destination: SourceToDestination(SystemWeb),
+			RoomID:      "ch-1",
+			ReplyTo:     "req-1",
+			Payload:     map[string]string{"result": "ok"},
+		}
+		err := client.Send(resp)
 		assert.NoError(t, err)
 	})
 
 	t.Run("maps device source correctly", func(t *testing.T) {
-		req := &RequestMessage{
-			Action:    "test",
-			Source:    SystemDevice,
-			RequestID: "req-2",
-			ChannelID: "ch-2",
-		}
-
 		conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
 			var envelope map[string]any
 			_ = json.Unmarshal(data, &envelope)
 			return envelope["destination"] == DestinationDevice
 		})).Return(nil).Once()
 
-		err := client.SendResponse(req, map[string]string{"result": "ok"})
+		resp := ResponseMessage{
+			Action:      "test",
+			Source:      SystemAPI,
+			Destination: SourceToDestination(SystemDevice),
+			RoomID:      "ch-2",
+			ReplyTo:     "req-2",
+			Payload:     map[string]string{"result": "ok"},
+		}
+		err := client.Send(resp)
 		assert.NoError(t, err)
 	})
 
 	t.Run("maps api source correctly", func(t *testing.T) {
-		req := &RequestMessage{
-			Action:    "test",
-			Source:    SystemAPI,
-			RequestID: "req-3",
-			ChannelID: "ch-3",
-		}
-
 		conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
 			var envelope map[string]any
 			_ = json.Unmarshal(data, &envelope)
 			return envelope["destination"] == DestinationAPI
 		})).Return(nil).Once()
 
-		err := client.SendResponse(req, map[string]string{"result": "ok"})
+		resp := ResponseMessage{
+			Action:      "test",
+			Source:      SystemAPI,
+			Destination: SourceToDestination(SystemAPI),
+			RoomID:      "ch-3",
+			ReplyTo:     "req-3",
+			Payload:     map[string]string{"result": "ok"},
+		}
+		err := client.Send(resp)
 		assert.NoError(t, err)
 	})
 
 	t.Run("handles unknown source", func(t *testing.T) {
-		req := &RequestMessage{
-			Action:    "test",
-			Source:    MessageSource("unknown"),
-			RequestID: "req-4",
-			ChannelID: "ch-4",
-		}
-
 		conn.On("SendMessage", mock.MatchedBy(func(data []byte) bool {
 			var envelope map[string]any
 			_ = json.Unmarshal(data, &envelope)
@@ -799,7 +606,15 @@ func TestClient_SourceToDestination(t *testing.T) {
 			return envelope["destination"] == "unknown"
 		})).Return(nil).Once()
 
-		err := client.SendResponse(req, map[string]string{"result": "ok"})
+		resp := ResponseMessage{
+			Action:      "test",
+			Source:      SystemAPI,
+			Destination: SourceToDestination(MessageSource("unknown")),
+			RoomID:      "ch-4",
+			ReplyTo:     "req-4",
+			Payload:     map[string]string{"result": "ok"},
+		}
+		err := client.Send(resp)
 		assert.NoError(t, err)
 	})
 

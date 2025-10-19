@@ -30,7 +30,7 @@ type EventMessage struct {
     Payload      any                `json:"payload,omitempty"`
     Source       MessageSource      `json:"source"`
     Destination  MessageDestination `json:"destination"`
-    ChannelID    ChannelID          `json:"channel_id,omitempty"`
+    RoomID    RoomID          `json:"room_id,omitempty"`
     Retained     bool               `json:"retained,omitempty"`  // NEW: Store for new clients
     TraceContext map[string]string  `json:"trace_context,omitempty"`
 }
@@ -206,7 +206,7 @@ type Client interface {
 ```go
 // WillRegistry manages last will messages
 type WillRegistry struct {
-    // Key: deviceID or channelID -> WillMessage
+    // Key: deviceID or RoomID -> WillMessage
     wills map[string]WillMessage
     mutex sync.RWMutex
 }

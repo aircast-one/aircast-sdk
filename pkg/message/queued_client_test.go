@@ -25,19 +25,14 @@ func (m *MockClient) Listen(ctx context.Context) error {
 	return args.Error(0)
 }
 
-func (m *MockClient) SendMessageToChannel(id ChannelID, msg any) error {
-	args := m.Called(id, msg)
-	return args.Error(0)
-}
-
-func (m *MockClient) SendBroadcastMessage(msg any) error {
+func (m *MockClient) Send(msg any) error {
 	args := m.Called(msg)
 	return args.Error(0)
 }
 
-func (m *MockClient) Send(msg any, sessionId *ChannelID) error {
-	args := m.Called(msg, sessionId)
-	return args.Error(0)
+func (m *MockClient) GetSource() MessageSource {
+	args := m.Called()
+	return args.Get(0).(MessageSource)
 }
 
 func (m *MockClient) Close() error {
@@ -60,21 +55,6 @@ func (m *MockClient) ReadMessage() <-chan any {
 		return ch.(chan any)
 	}
 	return nil
-}
-
-func (m *MockClient) SendResponse(req *RequestMessage, payload any) error {
-	args := m.Called(req, payload)
-	return args.Error(0)
-}
-
-func (m *MockClient) SendErrorToChannel(req *RequestMessage, payload ErrorResponse) error {
-	args := m.Called(req, payload)
-	return args.Error(0)
-}
-
-func (m *MockClient) SendEventToChannel(action MessageAction, payload any, destination MessageDestination, sessionID ChannelID) error {
-	args := m.Called(action, payload, destination, sessionID)
-	return args.Error(0)
 }
 
 func (m *MockClient) RegisterWill(will WillMessage) error {
@@ -128,18 +108,18 @@ func TestQueuedClient_QueueMessagesWhenDisconnected(t *testing.T) {
 	connectionError := errors.New("client connection is closed")
 
 	// Setup mock to return connection error
-	channelID := ChannelID("test-channel")
-	mockClient.On("Send", mock.Anything, &channelID).Return(connectionError)
+	RoomID := RoomID("test-channel")
+	mockClient.On("Send", mock.Anything).Return(connectionError)
 
 	// Send a message while disconnected
 	msg := EventMessage{
-		Action:    "test.event",
-		Payload:   map[string]any{"data": "test"},
-		Source:    SystemDevice,
-		ChannelID: channelID,
+		Action:  "test.event",
+		Payload: map[string]any{"data": "test"},
+		Source:  SystemDevice,
+		RoomID:  RoomID,
 	}
 
-	err := qc.Send(msg, &channelID)
+	err := qc.Send(msg)
 
 	// Should return error for non-critical message
 	assert.Error(t, err)
@@ -166,18 +146,18 @@ func TestQueuedClient_CriticalMessageNoError(t *testing.T) {
 	connectionError := errors.New("client connection is closed")
 
 	// Setup mock to return connection error
-	channelID := ChannelID("test-channel")
-	mockClient.On("Send", mock.Anything, &channelID).Return(connectionError)
+	RoomID := RoomID("test-channel")
+	mockClient.On("Send", mock.Anything).Return(connectionError)
 
 	// Send a critical message while disconnected
 	msg := EventMessage{
-		Action:    "critical.event",
-		Payload:   map[string]any{"data": "test"},
-		Source:    SystemDevice,
-		ChannelID: channelID,
+		Action:  "critical.event",
+		Payload: map[string]any{"data": "test"},
+		Source:  SystemDevice,
+		RoomID:  RoomID,
 	}
 
-	err := qc.Send(msg, &channelID)
+	err := qc.Send(msg)
 
 	// Should NOT return error for critical message
 	assert.NoError(t, err, "Critical message should not return error")
@@ -208,32 +188,32 @@ func TestQueuedClient_FlushOnReconnection(t *testing.T) {
 	mockClient.SetClosed(true)
 	connectionError := errors.New("client connection is closed")
 
-	channelID := ChannelID("test-channel")
+	RoomID := RoomID("test-channel")
 
 	// Setup mock: first 2 calls fail, subsequent succeed
 	callCount := 0
-	mockClient.On("Send", mock.Anything, &channelID).Return(connectionError).Times(2)
-	mockClient.On("Send", mock.Anything, &channelID).Return(nil).Run(func(args mock.Arguments) {
+	mockClient.On("Send", mock.Anything).Return(connectionError).Times(2)
+	mockClient.On("Send", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
 		callCount++
 	})
 
 	// Send messages while disconnected
 	msg1 := EventMessage{
-		Action:    "test.event1",
-		Payload:   map[string]any{"data": "test1"},
-		Source:    SystemDevice,
-		ChannelID: channelID,
+		Action:  "test.event1",
+		Payload: map[string]any{"data": "test1"},
+		Source:  SystemDevice,
+		RoomID:  RoomID,
 	}
 	msg2 := EventMessage{
-		Action:    "test.event2",
-		Payload:   map[string]any{"data": "test2"},
-		Source:    SystemDevice,
-		ChannelID: channelID,
+		Action:  "test.event2",
+		Payload: map[string]any{"data": "test2"},
+		Source:  SystemDevice,
+		RoomID:  RoomID,
 	}
 
-	err := qc.Send(msg1, &channelID)
+	err := qc.Send(msg1)
 	require.NoError(t, err)
-	err = qc.Send(msg2, &channelID)
+	err = qc.Send(msg2)
 	require.NoError(t, err)
 
 	assert.Equal(t, 2, qc.GetQueueSize(), "Both messages should be queued")
@@ -271,18 +251,18 @@ func TestQueuedClient_MessageExpiration(t *testing.T) {
 	mockClient.SetClosed(true)
 	connectionError := errors.New("client connection is closed")
 
-	channelID := ChannelID("test-channel")
-	mockClient.On("Send", mock.Anything, &channelID).Return(connectionError).Once()
+	RoomID := RoomID("test-channel")
+	mockClient.On("Send", mock.Anything).Return(connectionError).Once()
 
 	// Send a message
 	msg := EventMessage{
-		Action:    "test.event",
-		Payload:   map[string]any{"data": "test"},
-		Source:    SystemDevice,
-		ChannelID: channelID,
+		Action:  "test.event",
+		Payload: map[string]any{"data": "test"},
+		Source:  SystemDevice,
+		RoomID:  RoomID,
 	}
 
-	err := qc.Send(msg, &channelID)
+	err := qc.Send(msg)
 	require.NoError(t, err)
 	assert.Equal(t, 1, qc.GetQueueSize(), "Message should be queued")
 
@@ -295,7 +275,7 @@ func TestQueuedClient_MessageExpiration(t *testing.T) {
 
 	// Simulate reconnection
 	mockClient.SetClosed(false)
-	mockClient.On("Send", mock.Anything, &channelID).Return(nil).Maybe()
+	mockClient.On("Send", mock.Anything).Return(nil).Maybe()
 
 	// Trigger flush
 	qc.FlushQueueSync()
@@ -322,18 +302,18 @@ func TestQueuedClient_QueueSizeLimit(t *testing.T) {
 	mockClient.SetClosed(true)
 	connectionError := errors.New("client connection is closed")
 
-	channelID := ChannelID("test-channel")
-	mockClient.On("Send", mock.Anything, &channelID).Return(connectionError)
+	RoomID := RoomID("test-channel")
+	mockClient.On("Send", mock.Anything).Return(connectionError)
 
 	// Send more messages than queue size
 	for i := 0; i < 5; i++ {
 		msg := EventMessage{
-			Action:    MessageAction("test.event" + string(rune(i))),
-			Payload:   map[string]any{"index": i},
-			Source:    SystemDevice,
-			ChannelID: channelID,
+			Action:  MessageAction("test.event" + string(rune(i))),
+			Payload: map[string]any{"index": i},
+			Source:  SystemDevice,
+			RoomID:  RoomID,
 		}
-		_ = qc.Send(msg, &channelID)
+		_ = qc.Send(msg)
 	}
 
 	// Queue should not exceed max size
@@ -368,35 +348,35 @@ func TestQueuedClient_CriticalMessagePriority(t *testing.T) {
 	mockClient.SetClosed(true)
 	connectionError := errors.New("client connection is closed")
 
-	channelID := ChannelID("test-channel")
-	mockClient.On("Send", mock.Anything, &channelID).Return(connectionError)
+	RoomID := RoomID("test-channel")
+	mockClient.On("Send", mock.Anything).Return(connectionError)
 
 	// Send normal message
 	normalMsg := EventMessage{
-		Action:    "normal.event",
-		Payload:   map[string]any{"type": "normal"},
-		Source:    SystemDevice,
-		ChannelID: channelID,
+		Action:  "normal.event",
+		Payload: map[string]any{"type": "normal"},
+		Source:  SystemDevice,
+		RoomID:  RoomID,
 	}
-	_ = qc.Send(normalMsg, &channelID)
+	_ = qc.Send(normalMsg)
 
 	// Send critical message
 	criticalMsg := EventMessage{
-		Action:    "critical.event",
-		Payload:   map[string]any{"type": "critical"},
-		Source:    SystemDevice,
-		ChannelID: channelID,
+		Action:  "critical.event",
+		Payload: map[string]any{"type": "critical"},
+		Source:  SystemDevice,
+		RoomID:  RoomID,
 	}
-	_ = qc.Send(criticalMsg, &channelID)
+	_ = qc.Send(criticalMsg)
 
 	// Try to add another normal message (should drop the first normal message)
 	normalMsg2 := EventMessage{
-		Action:    "normal.event2",
-		Payload:   map[string]any{"type": "normal2"},
-		Source:    SystemDevice,
-		ChannelID: channelID,
+		Action:  "normal.event2",
+		Payload: map[string]any{"type": "normal2"},
+		Source:  SystemDevice,
+		RoomID:  RoomID,
 	}
-	_ = qc.Send(normalMsg2, &channelID)
+	_ = qc.Send(normalMsg2)
 
 	assert.Equal(t, 2, qc.GetQueueSize(), "Queue should be at max size")
 
@@ -432,26 +412,26 @@ func TestQueuedClient_MaxRetries(t *testing.T) {
 	mockClient.SetClosed(true)
 	connectionError := errors.New("client connection is closed")
 
-	channelID := ChannelID("test-channel")
+	RoomID := RoomID("test-channel")
 
 	// First call fails (initial send)
-	mockClient.On("Send", mock.Anything, &channelID).Return(connectionError).Once()
+	mockClient.On("Send", mock.Anything).Return(connectionError).Once()
 
 	// Send message while disconnected
 	msg := EventMessage{
-		Action:    "test.event",
-		Payload:   map[string]any{"data": "test"},
-		Source:    SystemDevice,
-		ChannelID: channelID,
+		Action:  "test.event",
+		Payload: map[string]any{"data": "test"},
+		Source:  SystemDevice,
+		RoomID:  RoomID,
 	}
-	_ = qc.Send(msg, &channelID)
+	_ = qc.Send(msg)
 
 	// Simulate reconnection
 	mockClient.SetClosed(false)
 
 	// Setup to always fail for retry attempts
 	sendError := errors.New("send failed")
-	mockClient.On("Send", mock.Anything, &channelID).Return(sendError)
+	mockClient.On("Send", mock.Anything).Return(sendError)
 
 	// Manually trigger flushes to simulate retries
 	for i := 0; i <= config.MaxRetries; i++ {
@@ -480,25 +460,25 @@ func TestQueuedClient_GetQueueStats(t *testing.T) {
 	mockClient.SetClosed(true)
 	connectionError := errors.New("client connection is closed")
 
-	channelID := ChannelID("test-channel")
-	mockClient.On("Send", mock.Anything, &channelID).Return(connectionError)
+	RoomID := RoomID("test-channel")
+	mockClient.On("Send", mock.Anything).Return(connectionError)
 
 	// Send mixed messages
 	normalMsg := EventMessage{
-		Action:    "normal.event",
-		Payload:   map[string]any{"type": "normal"},
-		Source:    SystemDevice,
-		ChannelID: channelID,
+		Action:  "normal.event",
+		Payload: map[string]any{"type": "normal"},
+		Source:  SystemDevice,
+		RoomID:  RoomID,
 	}
-	_ = qc.Send(normalMsg, &channelID)
+	_ = qc.Send(normalMsg)
 
 	criticalMsg := EventMessage{
-		Action:    "critical.event",
-		Payload:   map[string]any{"type": "critical"},
-		Source:    SystemDevice,
-		ChannelID: channelID,
+		Action:  "critical.event",
+		Payload: map[string]any{"type": "critical"},
+		Source:  SystemDevice,
+		RoomID:  RoomID,
 	}
-	_ = qc.Send(criticalMsg, &channelID)
+	_ = qc.Send(criticalMsg)
 
 	// Get stats
 	stats := qc.GetQueueStats()
@@ -507,32 +487,6 @@ func TestQueuedClient_GetQueueStats(t *testing.T) {
 	assert.Equal(t, 1, stats["critical"], "Should have 1 critical message")
 	assert.Equal(t, 1, stats["normal"], "Should have 1 normal message")
 	assert.NotNil(t, stats["oldest_age"], "Should have oldest age")
-}
-
-func TestQueuedClient_SendEventToChannel(t *testing.T) {
-	// Setup
-	mockClient := createMockClient()
-	logger := log.WithField("test", "QueuedClient")
-	config := DefaultQueueConfig()
-
-	// Create QueuedClient
-	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
-	defer func() {
-		_ = qc.Close()
-	}()
-
-	channelID := ChannelID("test-channel")
-	action := MessageAction("test.action")
-	payload := map[string]any{"data": "test"}
-	destination := DestinationWeb
-
-	// Setup mock to expect Send call (QueuedClient uses qc.Send internally)
-	mockClient.On("Send", mock.Anything, &channelID).Return(nil)
-
-	// Send event
-	err := qc.SendEventToChannel(action, payload, destination, channelID)
-
-	require.NoError(t, err)
 }
 
 func TestQueuedClient_ConcurrentAccess(t *testing.T) {
@@ -560,14 +514,14 @@ func TestQueuedClient_ConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func(index int) {
 			defer wg.Done()
-			channelID := ChannelID("channel")
+			RoomID := RoomID("channel")
 			msg := EventMessage{
-				Action:    MessageAction("test.event"),
-				Payload:   map[string]any{"index": index},
-				Source:    SystemDevice,
-				ChannelID: channelID,
+				Action:  MessageAction("test.event"),
+				Payload: map[string]any{"index": index},
+				Source:  SystemDevice,
+				RoomID:  RoomID,
 			}
-			_ = qc.Send(msg, &channelID)
+			_ = qc.Send(msg)
 		}(i)
 	}
 
@@ -595,14 +549,14 @@ func TestQueuedClient_ConcurrentAccess(t *testing.T) {
 
 	go func() {
 		defer flushWg.Done()
-		channelID := ChannelID("channel")
+		RoomID := RoomID("channel")
 		msg := EventMessage{
-			Action:    "concurrent.event",
-			Payload:   map[string]any{"concurrent": true},
-			Source:    SystemDevice,
-			ChannelID: channelID,
+			Action:  "concurrent.event",
+			Payload: map[string]any{"concurrent": true},
+			Source:  SystemDevice,
+			RoomID:  RoomID,
 		}
-		_ = qc.Send(msg, &channelID)
+		_ = qc.Send(msg)
 	}()
 
 	// Wait for operations to complete
@@ -629,19 +583,19 @@ func BenchmarkQueuedClient_Send(b *testing.B) {
 		_ = qc.Close()
 	}()
 
-	channelID := ChannelID("bench-channel")
-	mockClient.On("Send", mock.Anything, &channelID).Return(nil)
+	RoomID := RoomID("bench-channel")
+	mockClient.On("Send", mock.Anything).Return(nil)
 
 	msg := EventMessage{
-		Action:    "bench.event",
-		Payload:   map[string]any{"data": "benchmark"},
-		Source:    SystemDevice,
-		ChannelID: channelID,
+		Action:  "bench.event",
+		Payload: map[string]any{"data": "benchmark"},
+		Source:  SystemDevice,
+		RoomID:  RoomID,
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = qc.Send(msg, &channelID)
+		_ = qc.Send(msg)
 	}
 }
 
@@ -658,27 +612,27 @@ func BenchmarkQueuedClient_QueueAndFlush(b *testing.B) {
 		_ = qc.Close()
 	}()
 
-	channelID := ChannelID("bench-channel")
+	RoomID := RoomID("bench-channel")
 
 	// Start disconnected
 	mockClient.SetClosed(true)
-	mockClient.On("Send", mock.Anything, &channelID).Return(errors.New("disconnected")).Times(b.N)
+	mockClient.On("Send", mock.Anything).Return(errors.New("disconnected")).Times(b.N)
 
 	msg := EventMessage{
-		Action:    "bench.event",
-		Payload:   map[string]any{"data": "benchmark"},
-		Source:    SystemDevice,
-		ChannelID: channelID,
+		Action:  "bench.event",
+		Payload: map[string]any{"data": "benchmark"},
+		Source:  SystemDevice,
+		RoomID:  RoomID,
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = qc.Send(msg, &channelID)
+		_ = qc.Send(msg)
 	}
 
 	// Now benchmark the flush
 	mockClient.SetClosed(false)
-	mockClient.On("Send", mock.Anything, &channelID).Return(nil)
+	mockClient.On("Send", mock.Anything).Return(nil)
 
 	b.StartTimer()
 	qc.flushQueue()
@@ -699,26 +653,6 @@ func TestQueuedClient_DelegationMethods(t *testing.T) {
 		mockClient.AssertCalled(t, "Listen", ctx)
 	})
 
-	t.Run("SendMessageToChannel uses Send internally", func(t *testing.T) {
-		channelID := ChannelID("test-channel")
-		msg := EventMessage{Action: "test.event"}
-		// SendMessageToChannel calls qc.Send which calls client.Send
-		mockClient.On("Send", msg, &channelID).Return(nil).Once()
-		err := qc.SendMessageToChannel(channelID, msg)
-		assert.NoError(t, err)
-		mockClient.AssertCalled(t, "Send", msg, &channelID)
-	})
-
-	t.Run("SendBroadcastMessage uses Send internally", func(t *testing.T) {
-		msg := EventMessage{Action: "test.event"}
-		// SendBroadcastMessage calls qc.Send with nil channelID
-		var nilChannelID *ChannelID
-		mockClient.On("Send", msg, nilChannelID).Return(nil).Once()
-		err := qc.SendBroadcastMessage(msg)
-		assert.NoError(t, err)
-		mockClient.AssertCalled(t, "Send", msg, nilChannelID)
-	})
-
 	t.Run("IsClosed delegation", func(t *testing.T) {
 		mockClient.SetClosed(true)
 		assert.True(t, qc.IsClosed())
@@ -732,24 +666,6 @@ func TestQueuedClient_DelegationMethods(t *testing.T) {
 		result := qc.ReadMessage()
 		assert.NotNil(t, result, "ReadMessage should return a channel")
 		mockClient.AssertCalled(t, "ReadMessage")
-	})
-
-	t.Run("SendResponse delegation", func(t *testing.T) {
-		req := &RequestMessage{Action: "test.action", RequestID: "req-123"}
-		payload := map[string]any{"result": "success"}
-		mockClient.On("SendResponse", req, payload).Return(nil).Once()
-		err := qc.SendResponse(req, payload)
-		assert.NoError(t, err)
-		mockClient.AssertCalled(t, "SendResponse", req, payload)
-	})
-
-	t.Run("SendErrorToChannel delegation", func(t *testing.T) {
-		req := &RequestMessage{Action: "test.action", RequestID: "req-123"}
-		errResp := ErrorResponse{Code: "ERROR", Message: "test error"}
-		mockClient.On("SendErrorToChannel", req, errResp).Return(nil).Once()
-		err := qc.SendErrorToChannel(req, errResp)
-		assert.NoError(t, err)
-		mockClient.AssertCalled(t, "SendErrorToChannel", req, errResp)
 	})
 
 	t.Run("RegisterWill delegation", func(t *testing.T) {

@@ -11,12 +11,11 @@ import (
 
 // QueuedMessage represents a message waiting to be sent
 type QueuedMessage struct {
-	Type      string     `json:"type"`
-	Message   any        `json:"message"`
-	ChannelID *ChannelID `json:"channel_id,omitempty"`
-	Timestamp time.Time  `json:"timestamp"`
-	Retries   int        `json:"retries"`
-	Critical  bool       `json:"critical"`
+	Type      string    `json:"type"`
+	Message   any       `json:"message"`
+	Timestamp time.Time `json:"timestamp"`
+	Retries   int       `json:"retries"`
+	Critical  bool      `json:"critical"`
 }
 
 // QueueConfig configures the message queue behavior
@@ -171,23 +170,23 @@ func (qc *QueuedClient) flushQueue() {
 			continue
 		}
 
-		// Try to send based on message type
+		// Try to send the message
 		var err error
 		switch msg.Type {
 		case "event":
 			if eventMsg, ok := msg.Message.(EventMessage); ok {
-				err = qc.client.Send(eventMsg, msg.ChannelID)
+				err = qc.client.Send(eventMsg)
 			}
 		case "response":
 			if respMsg, ok := msg.Message.(ResponseMessage); ok {
-				err = qc.client.Send(respMsg, msg.ChannelID)
+				err = qc.client.Send(respMsg)
 			}
 		case "request":
 			if reqMsg, ok := msg.Message.(RequestMessage); ok {
-				err = qc.client.Send(reqMsg, msg.ChannelID)
+				err = qc.client.Send(reqMsg)
 			}
 		default:
-			err = qc.client.Send(msg.Message, msg.ChannelID)
+			err = qc.client.Send(msg.Message)
 		}
 
 		if err != nil {
@@ -226,7 +225,7 @@ func (qc *QueuedClient) flushQueue() {
 }
 
 // queueMessage adds a message to the queue
-func (qc *QueuedClient) queueMessage(msgType string, message any, channelID *ChannelID, critical bool) {
+func (qc *QueuedClient) queueMessage(msgType string, message any, critical bool) {
 	qc.queueMutex.Lock()
 	defer qc.queueMutex.Unlock()
 
@@ -254,7 +253,6 @@ func (qc *QueuedClient) queueMessage(msgType string, message any, channelID *Cha
 	qc.queue = append(qc.queue, QueuedMessage{
 		Type:      msgType,
 		Message:   message,
-		ChannelID: channelID,
 		Timestamp: time.Now(),
 		Retries:   0,
 		Critical:  critical,
@@ -333,9 +331,9 @@ func (qc *QueuedClient) logWithLevel(level string, msg string, fields log.Fields
 }
 
 // Send attempts to send a message, queuing it if the connection is down
-func (qc *QueuedClient) Send(msg any, sessionId *ChannelID) error {
+func (qc *QueuedClient) Send(msg any) error {
 	// Try to send immediately
-	err := qc.client.Send(msg, sessionId)
+	err := qc.client.Send(msg)
 
 	if err != nil {
 		// Check if it's a connection error
@@ -359,7 +357,7 @@ func (qc *QueuedClient) Send(msg any, sessionId *ChannelID) error {
 
 			// Queue the message
 			critical := qc.isCriticalMessage(msg)
-			qc.queueMessage(msgType, msg, sessionId, critical)
+			qc.queueMessage(msgType, msg, critical)
 
 			// Return nil for critical messages to prevent upstream errors
 			if critical {
@@ -375,35 +373,10 @@ func (qc *QueuedClient) Send(msg any, sessionId *ChannelID) error {
 	return err
 }
 
-// SendEventToChannel sends an event, queuing it if the connection is down
-// This method builds the EventMessage and uses qc.Send() to get proper queuing behavior for critical messages
-func (qc *QueuedClient) SendEventToChannel(action MessageAction, payload any, destination MessageDestination, sessionID ChannelID) error {
-	// Build the EventMessage
-	event := EventMessage{
-		Action:      action,
-		Payload:     payload,
-		Source:      qc.source,
-		Destination: destination,
-		ChannelID:   sessionID,
-	}
-
-	// Use qc.Send() which has the queuing logic
-	// This will queue critical messages if connection is down, and return nil for them
-	return qc.Send(event, &sessionID)
-}
-
 // Delegate all other methods to the underlying client
 
 func (qc *QueuedClient) Listen(ctx context.Context) error {
 	return qc.client.Listen(ctx)
-}
-
-func (qc *QueuedClient) SendMessageToChannel(id ChannelID, msg any) error {
-	return qc.Send(msg, &id)
-}
-
-func (qc *QueuedClient) SendBroadcastMessage(msg any) error {
-	return qc.Send(msg, nil)
 }
 
 func (qc *QueuedClient) Close() error {
@@ -433,14 +406,9 @@ func (qc *QueuedClient) ReadMessage() <-chan any {
 	return qc.client.ReadMessage()
 }
 
-func (qc *QueuedClient) SendResponse(req *RequestMessage, payload any) error {
-	// Delegate to underlying client to ensure destination is properly set
-	return qc.client.SendResponse(req, payload)
-}
-
-func (qc *QueuedClient) SendErrorToChannel(req *RequestMessage, errResponse ErrorResponse) error {
-	// Delegate to underlying client to ensure destination is properly set
-	return qc.client.SendErrorToChannel(req, errResponse)
+// GetSource returns the message source for this client
+func (qc *QueuedClient) GetSource() MessageSource {
+	return qc.source
 }
 
 // GetQueueSize returns the current number of queued messages (for monitoring)

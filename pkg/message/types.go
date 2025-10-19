@@ -9,7 +9,7 @@ type MessageAction = string
 type MessageSource = string
 type MessageDestination = string
 type RequestID = string
-type ChannelID = string
+type RoomID = string
 type GenericMessage = any
 
 // MessagePayload is the payload contained in a WebSocket message
@@ -65,7 +65,7 @@ type RequestMessage struct {
 	Source       MessageSource     `json:"source"`
 	Destination  MessageSource     `json:"destination"`
 	RequestID    string            `json:"request_id"`
-	ChannelID    string            `json:"channel_id,omitempty"`
+	RoomID       string            `json:"room_id,omitempty"`
 	TraceContext map[string]string `json:"trace_context,omitempty"` // W3C Trace Context (traceparent, tracestate)
 }
 
@@ -75,7 +75,7 @@ type ResponseMessage struct {
 	Payload      any                `json:"payload,omitempty"`
 	Source       MessageSource      `json:"source"`
 	Destination  MessageDestination `json:"destination"`
-	ChannelID    ChannelID          `json:"channel_id,omitempty"`
+	RoomID       RoomID             `json:"room_id,omitempty"`
 	ReplyTo      RequestID          `json:"reply_to"`
 	TraceContext map[string]string  `json:"trace_context,omitempty"` // W3C Trace Context for correlation
 }
@@ -92,7 +92,7 @@ type ErrorMessage struct {
 	Action       MessageAction      `json:"action"`
 	Source       MessageSource      `json:"source"`
 	Destination  MessageDestination `json:"destination"`
-	ChannelID    ChannelID          `json:"channel_id,omitempty"`
+	RoomID       RoomID             `json:"room_id,omitempty"`
 	Error        ErrorResponse      `json:"error"`
 	ReplyTo      RequestID          `json:"reply_to"`
 	TraceContext map[string]string  `json:"trace_context,omitempty"` // W3C Trace Context for correlation
@@ -104,7 +104,7 @@ type EventMessage struct {
 	Payload      any                `json:"payload,omitempty"`
 	Source       MessageSource      `json:"source"`
 	Destination  MessageDestination `json:"destination"`
-	ChannelID    ChannelID          `json:"channel_id,omitempty"`
+	RoomID       RoomID             `json:"room_id,omitempty"`
 	Retained     bool               `json:"retained,omitempty"`      // If true, API stores and sends to new clients
 	TraceContext map[string]string  `json:"trace_context,omitempty"` // W3C Trace Context (traceparent, tracestate)
 }
@@ -126,5 +126,5 @@ type SessionConfig struct {
 
 // Channel represents a communication channel
 type Channel struct {
-	ID ChannelID `json:"id"`
+	ID RoomID `json:"id"`
 }

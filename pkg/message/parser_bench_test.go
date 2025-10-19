@@ -12,7 +12,7 @@ func BenchmarkUnmarshalMessage(b *testing.B) {
 		"action": "get_device",
 		"source": "api",
 		"request_id": "req-123",
-		"channel_id": "channel-456",
+		"room_id": "channel-456",
 		"payload": {"device_id": "device-789", "status": "active", "metadata": {"key": "value"}}
 	}`)
 
@@ -20,7 +20,7 @@ func BenchmarkUnmarshalMessage(b *testing.B) {
 		"type": "response",
 		"action": "get_device",
 		"source": "device",
-		"channel_id": "channel-456",
+		"room_id": "channel-456",
 		"reply_to": "req-123",
 		"payload": {"status": "success", "data": {"id": "123", "name": "test"}}
 	}`)
@@ -29,7 +29,7 @@ func BenchmarkUnmarshalMessage(b *testing.B) {
 		"type": "error",
 		"action": "get_device",
 		"source": "device",
-		"channel_id": "channel-456",
+		"room_id": "channel-456",
 		"reply_to": "req-123",
 		"error": {"code": "DEVICE_NOT_FOUND", "message": "Device not found", "details": {"id": "789"}}
 	}`)
@@ -38,7 +38,7 @@ func BenchmarkUnmarshalMessage(b *testing.B) {
 		"type": "event",
 		"action": "device_connected",
 		"source": "device",
-		"channel_id": "channel-456",
+		"room_id": "channel-456",
 		"payload": {"device_id": "device-789", "timestamp": "2023-01-01T00:00:00Z"}
 	}`)
 
@@ -247,7 +247,7 @@ func BenchmarkUnmarshalMessageAllocs(b *testing.B) {
 		"action": "test_action",
 		"source": "device",
 		"request_id": "req-123",
-		"channel_id": "channel-456",
+		"room_id": "channel-456",
 		"payload": {"device_id": "device-789", "status": "active"}
 	}`)
 

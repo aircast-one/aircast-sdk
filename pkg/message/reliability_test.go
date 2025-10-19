@@ -296,7 +296,7 @@ func TestConcurrentSendReliability(t *testing.T) {
 					Payload:   map[string]int{"id": id, "seq": j},
 				}
 
-				err := client.Send(msg, nil)
+				err := client.Send(msg)
 				if err != nil {
 					atomic.AddInt64(&errorCount, 1)
 				}
@@ -348,7 +348,7 @@ func TestClientCloseRaceCondition(t *testing.T) {
 					Source:  SystemDevice,
 					Payload: map[string]string{"test": "data"},
 				}
-				_ = client.Send(msg, nil)
+				_ = client.Send(msg)
 				time.Sleep(time.Microsecond)
 			}
 		}()
@@ -478,7 +478,7 @@ func TestMemoryLeaks(t *testing.T) {
 				"data":  "test data that should not leak",
 			},
 		}
-		_ = client.Send(msg, nil)
+		_ = client.Send(msg)
 
 		// Receive message
 		testMsg := map[string]any{
