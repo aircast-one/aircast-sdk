@@ -16,7 +16,7 @@ func TestRoomManager_Subscribe_SingleSubscriber(t *testing.T) {
 	logger.Logger.SetLevel(logrus.PanicLevel) // Suppress logs in tests
 
 	// Create room manager
-	rm := NewRoomManager(logger)
+	rm := NewRoomManagerWithMemory(logger)
 
 	roomID := message.RoomID("test-room-1")
 
@@ -36,7 +36,7 @@ func TestRoomManager_Subscribe_MultipleSubscribers(t *testing.T) {
 	logger := logrus.NewEntry(logrus.New())
 	logger.Logger.SetLevel(logrus.PanicLevel)
 
-	rm := NewRoomManager(logger)
+	rm := NewRoomManagerWithMemory(logger)
 	roomID := message.RoomID("test-room-2")
 
 	// Multiple subscribers
@@ -59,7 +59,7 @@ func TestRoomManager_Subscribe_MultipleSubscribers(t *testing.T) {
 		Payload: map[string]any{"broadcast": "data"},
 	}
 
-	rm.publish(roomID, eventMsg)
+	rm.driver.Publish(roomID, eventMsg)
 
 	// All three subscribers should receive the message
 	timeout := time.After(100 * time.Millisecond)
@@ -97,7 +97,7 @@ func TestRoomManager_Subscribe_DuplicateSubscriber(t *testing.T) {
 	logger := logrus.NewEntry(logrus.New())
 	logger.Logger.SetLevel(logrus.PanicLevel)
 
-	rm := NewRoomManager(logger)
+	rm := NewRoomManagerWithMemory(logger)
 	roomID := message.RoomID("test-room-3")
 
 	// First subscription succeeds
@@ -114,7 +114,7 @@ func TestRoomManager_CloseAll(t *testing.T) {
 	logger := logrus.NewEntry(logrus.New())
 	logger.Logger.SetLevel(logrus.PanicLevel)
 
-	rm := NewRoomManager(logger)
+	rm := NewRoomManagerWithMemory(logger)
 	roomID := message.RoomID("test-room-4")
 
 	// Subscribe
@@ -136,7 +136,7 @@ func TestRoomManager_DifferentRooms(t *testing.T) {
 	logger := logrus.NewEntry(logrus.New())
 	logger.Logger.SetLevel(logrus.PanicLevel)
 
-	rm := NewRoomManager(logger)
+	rm := NewRoomManagerWithMemory(logger)
 
 	room1ID := message.RoomID("room-1")
 	room2ID := message.RoomID("room-2")
@@ -152,7 +152,7 @@ func TestRoomManager_DifferentRooms(t *testing.T) {
 		RoomID:  room1ID,
 		Payload: map[string]any{},
 	}
-	rm.publish(room1ID, eventMsg)
+	rm.driver.Publish(room1ID, eventMsg)
 
 	// Only room-1 subscriber should receive it
 	select {
@@ -182,7 +182,7 @@ func TestRoomManager_ListenAndRoute(t *testing.T) {
 	}
 
 	// Create room manager
-	rm := NewRoomManager(logger)
+	rm := NewRoomManagerWithMemory(logger)
 
 	roomID := message.RoomID("test-room-routing")
 

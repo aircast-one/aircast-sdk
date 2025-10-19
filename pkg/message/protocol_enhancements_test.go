@@ -166,7 +166,7 @@ func TestUnmarshalMessage_WillType(t *testing.T) {
 		msg, err := UnmarshalMessage([]byte(jsonData))
 		require.NoError(t, err)
 
-		will, ok := msg.(WillMessage)
+		will, ok := msg.(*WillMessage)
 		require.True(t, ok, "should unmarshal to WillMessage")
 		assert.Equal(t, "device.status", string(will.Action))
 		assert.Equal(t, DestinationBroadcast, will.Destination)
@@ -276,7 +276,7 @@ func TestProtocolEnhancements_Integration(t *testing.T) {
 		parsed, err := UnmarshalMessage(data)
 		require.NoError(t, err)
 
-		event, ok := parsed.(EventMessage)
+		event, ok := parsed.(*EventMessage)
 		require.True(t, ok)
 		assert.Equal(t, original.Action, event.Action)
 		assert.Equal(t, original.Retained, event.Retained)
@@ -305,7 +305,7 @@ func TestProtocolEnhancements_Integration(t *testing.T) {
 		parsed, err := UnmarshalMessage(data)
 		require.NoError(t, err)
 
-		will, ok := parsed.(WillMessage)
+		will, ok := parsed.(*WillMessage)
 		require.True(t, ok)
 		assert.Equal(t, original.Action, will.Action)
 		assert.Equal(t, original.Destination, will.Destination)
@@ -326,7 +326,7 @@ func TestProtocolEnhancements_BackwardCompatibility(t *testing.T) {
 		msg, err := UnmarshalMessage([]byte(jsonData))
 		require.NoError(t, err)
 
-		event, ok := msg.(EventMessage)
+		event, ok := msg.(*EventMessage)
 		require.True(t, ok)
 		assert.False(t, event.Retained, "retained should default to false")
 	})

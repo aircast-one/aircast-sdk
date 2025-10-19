@@ -433,3 +433,81 @@ func TestMessageStructuresWithComplexPayloads(t *testing.T) {
 		assert.Len(t, decodedPayload, 2)
 	})
 }
+
+func TestSetMessageRoomID(t *testing.T) {
+	roomID := RoomID("test-room-123")
+
+	t.Run("EventMessage", func(t *testing.T) {
+		msg := &EventMessage{Action: "test.action"}
+		success := SetMessageRoomID(msg, roomID)
+		assert.True(t, success)
+		assert.Equal(t, roomID, msg.RoomID)
+	})
+
+	t.Run("RequestMessage", func(t *testing.T) {
+		msg := &RequestMessage{Action: "test.action"}
+		success := SetMessageRoomID(msg, roomID)
+		assert.True(t, success)
+		assert.Equal(t, string(roomID), msg.RoomID)
+	})
+
+	t.Run("ResponseMessage", func(t *testing.T) {
+		msg := &ResponseMessage{Action: "test.action"}
+		success := SetMessageRoomID(msg, roomID)
+		assert.True(t, success)
+		assert.Equal(t, roomID, msg.RoomID)
+	})
+
+	t.Run("ErrorMessage", func(t *testing.T) {
+		msg := &ErrorMessage{Action: "test.action"}
+		success := SetMessageRoomID(msg, roomID)
+		assert.True(t, success)
+		assert.Equal(t, roomID, msg.RoomID)
+	})
+
+	t.Run("RawJSONMap", func(t *testing.T) {
+		msg := map[string]any{
+			"action": "test.action",
+			"type":   "request",
+		}
+		success := SetMessageRoomID(msg, roomID)
+		assert.True(t, success)
+		assert.Equal(t, string(roomID), msg["room_id"])
+	})
+
+	t.Run("UnsupportedType", func(t *testing.T) {
+		msg := "not a message"
+		success := SetMessageRoomID(msg, roomID)
+		assert.False(t, success)
+	})
+
+	t.Run("ValueReceiverDoesNotWork", func(t *testing.T) {
+		// This demonstrates that value receivers won't work
+		// because the interface requires a pointer
+		msg := EventMessage{Action: "test.action"}
+		success := SetMessageRoomID(msg, roomID) // Not a pointer
+		assert.False(t, success)                 // Should fail because value doesn't implement MutableRoomMessage
+	})
+}
+
+func TestMutableRoomMessageInterface(t *testing.T) {
+	roomID := RoomID("test-room-456")
+
+	t.Run("PointerImplementsInterface", func(t *testing.T) {
+		msg := &EventMessage{Action: "test.action"}
+
+		// Verify it implements the interface
+		var _ MutableRoomMessage = msg
+
+		msg.SetRoomID(roomID)
+		assert.Equal(t, roomID, msg.GetRoomID())
+	})
+
+	t.Run("AllMessageTypesImplementInterface", func(t *testing.T) {
+		// Verify all message types implement MutableRoomMessage
+		var _ MutableRoomMessage = &EventMessage{}
+		var _ MutableRoomMessage = &RequestMessage{}
+		var _ MutableRoomMessage = &ResponseMessage{}
+		var _ MutableRoomMessage = &ErrorMessage{}
+	})
+}

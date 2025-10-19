@@ -106,7 +106,7 @@ func TestClient_Listen(t *testing.T) {
 		// Wait for message to be processed
 		select {
 		case msg := <-client.ReadMessage():
-			req, ok := msg.(RequestMessage)
+			req, ok := msg.(*RequestMessage)
 			require.True(t, ok)
 			assert.Equal(t, "test_action", req.Action)
 			assert.Equal(t, "req-123", req.RequestID)

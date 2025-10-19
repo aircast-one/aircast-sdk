@@ -186,10 +186,26 @@ func (c *client) Send(msg any) error {
 			Type:           TypeRequest,
 			RequestMessage: m,
 		}
+	case *RequestMessage:
+		envelope = struct {
+			Type string `json:"type"`
+			*RequestMessage
+		}{
+			Type:           TypeRequest,
+			RequestMessage: m,
+		}
 	case ResponseMessage:
 		envelope = struct {
 			Type string `json:"type"`
 			ResponseMessage
+		}{
+			Type:            TypeResponse,
+			ResponseMessage: m,
+		}
+	case *ResponseMessage:
+		envelope = struct {
+			Type string `json:"type"`
+			*ResponseMessage
 		}{
 			Type:            TypeResponse,
 			ResponseMessage: m,
@@ -202,10 +218,26 @@ func (c *client) Send(msg any) error {
 			Type:         TypeError,
 			ErrorMessage: m,
 		}
+	case *ErrorMessage:
+		envelope = struct {
+			Type string `json:"type"`
+			*ErrorMessage
+		}{
+			Type:         TypeError,
+			ErrorMessage: m,
+		}
 	case EventMessage:
 		envelope = struct {
 			Type string `json:"type"`
 			EventMessage
+		}{
+			Type:         TypeEvent,
+			EventMessage: m,
+		}
+	case *EventMessage:
+		envelope = struct {
+			Type string `json:"type"`
+			*EventMessage
 		}{
 			Type:         TypeEvent,
 			EventMessage: m,

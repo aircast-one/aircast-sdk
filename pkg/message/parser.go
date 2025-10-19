@@ -60,7 +60,7 @@ func UnmarshalMessage(data []byte) (any, error) {
 		if err := validateRequestMessage(&req); err != nil {
 			return nil, err
 		}
-		return req, nil
+		return &req, nil
 	case TypeResponse:
 		if err := validateResponseFields(genericMsg); err != nil {
 			return nil, err
@@ -72,7 +72,7 @@ func UnmarshalMessage(data []byte) (any, error) {
 		if err := validateResponseMessage(&res); err != nil {
 			return nil, err
 		}
-		return res, nil
+		return &res, nil
 	case TypeError:
 		if err := validateErrorFields(genericMsg); err != nil {
 			return nil, err
@@ -84,7 +84,7 @@ func UnmarshalMessage(data []byte) (any, error) {
 		if err := validateErrorMessage(&errMsg); err != nil {
 			return nil, err
 		}
-		return errMsg, nil
+		return &errMsg, nil
 	case TypeEvent:
 		if err := validateEventFields(genericMsg); err != nil {
 			return nil, err
@@ -96,7 +96,7 @@ func UnmarshalMessage(data []byte) (any, error) {
 		if err := validateEventMessage(&event); err != nil {
 			return nil, err
 		}
-		return event, nil
+		return &event, nil
 	case TypeWill:
 		if err := validateWillFields(genericMsg); err != nil {
 			return nil, err
@@ -108,7 +108,7 @@ func UnmarshalMessage(data []byte) (any, error) {
 		if err := validateWillMessage(&will); err != nil {
 			return nil, err
 		}
-		return will, nil
+		return &will, nil
 	default:
 		return nil, fmt.Errorf("unknown message type: %s", messageType)
 	}

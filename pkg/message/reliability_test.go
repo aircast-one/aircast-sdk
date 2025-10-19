@@ -130,7 +130,7 @@ func TestMessageReliability(t *testing.T) {
 		// Start receiver
 		go func() {
 			for msg := range client.ReadMessage() {
-				if req, ok := msg.(RequestMessage); ok {
+				if req, ok := msg.(*RequestMessage); ok {
 					mu.Lock()
 					received[req.RequestID] = true
 					mu.Unlock()
@@ -249,7 +249,7 @@ func TestMessageReliability(t *testing.T) {
 		// Message should be received within reasonable time
 		select {
 		case receivedMsg := <-client.ReadMessage():
-			req, ok := receivedMsg.(RequestMessage)
+			req, ok := receivedMsg.(*RequestMessage)
 			require.True(t, ok)
 			assert.Equal(t, "req-stuck", req.RequestID)
 		case <-time.After(100 * time.Millisecond):

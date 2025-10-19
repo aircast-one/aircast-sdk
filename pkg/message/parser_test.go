@@ -24,7 +24,7 @@ func TestUnmarshalMessage(t *testing.T) {
 		assert.NoError(t, err)
 		require.NotNil(t, msg)
 
-		req, ok := msg.(RequestMessage)
+		req, ok := msg.(*RequestMessage)
 		require.True(t, ok)
 
 		assert.Equal(t, "get_device", req.Action)
@@ -49,7 +49,7 @@ func TestUnmarshalMessage(t *testing.T) {
 		assert.NoError(t, err)
 		require.NotNil(t, msg)
 
-		resp, ok := msg.(ResponseMessage)
+		resp, ok := msg.(*ResponseMessage)
 		require.True(t, ok)
 
 		assert.Equal(t, "get_device", resp.Action)
@@ -78,7 +78,7 @@ func TestUnmarshalMessage(t *testing.T) {
 		assert.NoError(t, err)
 		require.NotNil(t, msg)
 
-		errMsg, ok := msg.(ErrorMessage)
+		errMsg, ok := msg.(*ErrorMessage)
 		require.True(t, ok)
 
 		assert.Equal(t, "get_device", errMsg.Action)
@@ -104,7 +104,7 @@ func TestUnmarshalMessage(t *testing.T) {
 		assert.NoError(t, err)
 		require.NotNil(t, msg)
 
-		event, ok := msg.(EventMessage)
+		event, ok := msg.(*EventMessage)
 		require.True(t, ok)
 
 		assert.Equal(t, "device_connected", event.Action)
@@ -240,7 +240,7 @@ func TestUnmarshalMessage(t *testing.T) {
 		assert.NoError(t, err)
 		require.NotNil(t, msg)
 
-		req, ok := msg.(RequestMessage)
+		req, ok := msg.(*RequestMessage)
 		require.True(t, ok)
 		assert.Equal(t, "test", req.Action)
 		assert.Equal(t, "api", req.Source)
@@ -262,7 +262,7 @@ func TestUnmarshalMessage(t *testing.T) {
 		assert.NoError(t, err)
 		require.NotNil(t, msg)
 
-		resp, ok := msg.(ResponseMessage)
+		resp, ok := msg.(*ResponseMessage)
 		require.True(t, ok)
 		assert.Equal(t, "test", resp.Action)
 		assert.Equal(t, "device", resp.Source)
@@ -285,7 +285,7 @@ func TestUnmarshalMessage(t *testing.T) {
 		assert.NoError(t, err)
 		require.NotNil(t, msg)
 
-		errMsg, ok := msg.(ErrorMessage)
+		errMsg, ok := msg.(*ErrorMessage)
 		require.True(t, ok)
 		assert.Equal(t, "test", errMsg.Action)
 		assert.Equal(t, "api", errMsg.Source)
@@ -307,7 +307,7 @@ func TestUnmarshalMessage(t *testing.T) {
 		assert.NoError(t, err)
 		require.NotNil(t, msg)
 
-		event, ok := msg.(EventMessage)
+		event, ok := msg.(*EventMessage)
 		require.True(t, ok)
 		assert.Equal(t, "test", event.Action)
 		assert.Equal(t, "device", event.Source)
@@ -523,7 +523,7 @@ func TestUnmarshalMessageEdgeCases(t *testing.T) {
 		assert.NoError(t, err)
 		require.NotNil(t, msg)
 
-		req, ok := msg.(RequestMessage)
+		req, ok := msg.(*RequestMessage)
 		require.True(t, ok)
 		assert.NotNil(t, req.Payload)
 
@@ -563,7 +563,7 @@ func TestUnmarshalMessageEdgeCases(t *testing.T) {
 		assert.NoError(t, err)
 		assert.NotNil(t, parsedMsg)
 
-		req, ok := parsedMsg.(RequestMessage)
+		req, ok := parsedMsg.(*RequestMessage)
 		require.True(t, ok)
 		assert.NotNil(t, req.Payload)
 	})
@@ -582,7 +582,7 @@ func TestUnmarshalMessageEdgeCases(t *testing.T) {
 		assert.NoError(t, err)
 		require.NotNil(t, msg)
 
-		req, ok := msg.(RequestMessage)
+		req, ok := msg.(*RequestMessage)
 		require.True(t, ok)
 		assert.Contains(t, req.Action, "special")
 	})
@@ -600,7 +600,7 @@ func TestUnmarshalMessageEdgeCases(t *testing.T) {
 		assert.NoError(t, err)
 		require.NotNil(t, msg)
 
-		event, ok := msg.(EventMessage)
+		event, ok := msg.(*EventMessage)
 		require.True(t, ok)
 		assert.NotNil(t, event.Payload)
 
@@ -891,7 +891,7 @@ func TestMessageValidation(t *testing.T) {
 			assert.NoError(t, err, "destination %s should be valid", dest)
 			require.NotNil(t, msg)
 
-			req, ok := msg.(RequestMessage)
+			req, ok := msg.(*RequestMessage)
 			require.True(t, ok)
 			assert.Equal(t, dest, req.Destination)
 		}
@@ -913,7 +913,7 @@ func TestMessageValidation(t *testing.T) {
 			assert.NoError(t, err, "source %s should be valid", src)
 			require.NotNil(t, msg)
 
-			req, ok := msg.(RequestMessage)
+			req, ok := msg.(*RequestMessage)
 			require.True(t, ok)
 			assert.Equal(t, src, req.Source)
 		}

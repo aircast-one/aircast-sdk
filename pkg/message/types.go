@@ -58,6 +58,18 @@ var (
 	ErrDeviceNotFound = errors.New("device not found")
 )
 
+// RoomMessage is an interface for messages that belong to a room
+type RoomMessage interface {
+	GetRoomID() RoomID
+}
+
+// MutableRoomMessage extends RoomMessage with the ability to set the room ID
+// Use pointer receivers when working with this interface
+type MutableRoomMessage interface {
+	RoomMessage
+	SetRoomID(roomID RoomID)
+}
+
 // RequestMessage represents a client request
 type RequestMessage struct {
 	Action       MessageAction     `json:"action"`
@@ -116,6 +128,64 @@ type WillMessage struct {
 	Payload      any                `json:"payload,omitempty"`
 	Destination  MessageDestination `json:"destination"`
 	TraceContext map[string]string  `json:"trace_context,omitempty"` // W3C Trace Context (traceparent, tracestate)
+}
+
+// GetRoomID implements RoomMessage interface for RequestMessage
+func (m RequestMessage) GetRoomID() RoomID {
+	return RoomID(m.RoomID)
+}
+
+// SetRoomID implements MutableRoomMessage interface for RequestMessage
+func (m *RequestMessage) SetRoomID(roomID RoomID) {
+	m.RoomID = string(roomID)
+}
+
+// GetRoomID implements RoomMessage interface for ResponseMessage
+func (m ResponseMessage) GetRoomID() RoomID {
+	return m.RoomID
+}
+
+// SetRoomID implements MutableRoomMessage interface for ResponseMessage
+func (m *ResponseMessage) SetRoomID(roomID RoomID) {
+	m.RoomID = roomID
+}
+
+// GetRoomID implements RoomMessage interface for ErrorMessage
+func (m ErrorMessage) GetRoomID() RoomID {
+	return m.RoomID
+}
+
+// SetRoomID implements MutableRoomMessage interface for ErrorMessage
+func (m *ErrorMessage) SetRoomID(roomID RoomID) {
+	m.RoomID = roomID
+}
+
+// GetRoomID implements RoomMessage interface for EventMessage
+func (m EventMessage) GetRoomID() RoomID {
+	return m.RoomID
+}
+
+// SetRoomID implements MutableRoomMessage interface for EventMessage
+func (m *EventMessage) SetRoomID(roomID RoomID) {
+	m.RoomID = roomID
+}
+
+// SetMessageRoomID sets the room ID on a message if it implements MutableRoomMessage
+// or if it's a raw JSON map. Returns true if the room ID was set successfully.
+func SetMessageRoomID(msg any, roomID RoomID) bool {
+	// Try typed messages first
+	if mutable, ok := msg.(MutableRoomMessage); ok {
+		mutable.SetRoomID(roomID)
+		return true
+	}
+
+	// Handle raw JSON maps (for clients sending untyped messages)
+	if msgMap, ok := msg.(map[string]any); ok {
+		msgMap["room_id"] = string(roomID)
+		return true
+	}
+
+	return false
 }
 
 // SessionConfig configures persistent session behavior
