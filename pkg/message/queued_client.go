@@ -2,6 +2,7 @@ package message
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -18,46 +19,59 @@ type QueuedMessage struct {
 	Critical  bool      `json:"critical"`
 }
 
-// QueueConfig configures the message queue behavior
+// QueueConfig configures the in-memory message queue behavior
 type QueueConfig struct {
-	MaxQueueSize           int                // Maximum number of messages to queue (default: 100)
+	// Queue behavior
+	MaxQueueSize           int                // Maximum number of messages to queue (default: 1000)
 	MaxMessageAge          time.Duration      // Maximum age of queued messages (default: 30s)
 	MaxCriticalAge         time.Duration      // Maximum age for critical messages (default: 60s)
-	FlushInterval          time.Duration      // How often to try flushing the queue (default: 1s)
 	MaxRetries             int                // Maximum retries for normal messages (default: 3)
 	MaxCriticalRetries     int                // Maximum retries for critical messages (default: 10)
 	Source                 MessageSource      // Message source (default: SystemDevice)
 	CriticalMessageActions []string           // List of message actions to treat as critical (supports prefix matching with "*")
 	IsCriticalMessage      func(msg any) bool // Optional function to determine if a message is critical (takes precedence over CriticalMessageActions)
+
+	// Advanced features
+	BackoffStrategy    BackoffStrategy // Backoff strategy (default: exponential 1s-30s)
+	EnableHealthCheck  bool            // Enable connection health monitoring (default: true)
+	HealthCheckTimeout time.Duration   // Ping timeout for health checks (default: 5s)
 }
 
-// DefaultQueueConfig returns sensible defaults
+// DefaultQueueConfig returns sensible defaults for in-memory queue
 func DefaultQueueConfig() QueueConfig {
 	return QueueConfig{
-		MaxQueueSize:       100,
+		MaxQueueSize:       1000,
 		MaxMessageAge:      30 * time.Second,
 		MaxCriticalAge:     60 * time.Second,
-		FlushInterval:      1 * time.Second,
 		MaxRetries:         3,
 		MaxCriticalRetries: 10,
 		Source:             SystemDevice,
+		BackoffStrategy:    NewExponentialBackoff(1*time.Second, 30*time.Second),
+		EnableHealthCheck:  true,
+		HealthCheckTimeout: 5 * time.Second,
 	}
 }
 
-// QueuedClient wraps a Client with message queuing capabilities
+// QueuedClient wraps a Client with in-memory message queuing, adaptive backoff, and health monitoring
 type QueuedClient struct {
 	client Client
 	logger *log.Entry
 	config QueueConfig
-	source MessageSource // Store source for creating messages
+	source MessageSource
 
-	// Message queue for handling disconnections
+	// In-memory queue (not persisted across restarts)
 	queue      []QueuedMessage
 	queueMutex sync.Mutex
 
-	// Connection state tracking
-	lastConnected bool
-	stateMutex    sync.RWMutex
+	// Connection state tracking with backoff
+	lastConnected     bool
+	consecutiveErrors int
+	stateMutex        sync.RWMutex
+
+	// Connection health metrics
+	lastSuccessfulSend time.Time
+	connectionQuality  string // "excellent", "good", "poor", "critical"
+	healthMutex        sync.RWMutex
 
 	// Control channels
 	ctx    context.Context
@@ -65,11 +79,15 @@ type QueuedClient struct {
 	wg     sync.WaitGroup
 }
 
-// NewQueuedClient creates a new client with message queuing
-func NewQueuedClient(client Client, logger *log.Entry, config *QueueConfig) Client {
+// NewQueuedClient creates a new client with in-memory message queuing, adaptive backoff, and health monitoring
+func NewQueuedClient(client Client, logger *log.Entry, config *QueueConfig) (Client, error) {
 	if config == nil {
-		cfg := DefaultQueueConfig()
-		config = &cfg
+		return nil, fmt.Errorf("config is required")
+	}
+
+	// Ensure backoff strategy is set
+	if config.BackoffStrategy == nil {
+		config.BackoffStrategy = NewExponentialBackoff(1*time.Second, 30*time.Second)
 	}
 
 	// Use source from config
@@ -81,35 +99,57 @@ func NewQueuedClient(client Client, logger *log.Entry, config *QueueConfig) Clie
 	ctx, cancel := context.WithCancel(context.Background())
 
 	qc := &QueuedClient{
-		client:        client,
-		logger:        logger.WithField("component", "QueuedClient"),
-		config:        *config,
-		source:        source,
-		queue:         make([]QueuedMessage, 0, config.MaxQueueSize),
-		lastConnected: !client.IsClosed(),
-		ctx:           ctx,
-		cancel:        cancel,
+		client:             client,
+		logger:             logger.WithField("component", "QueuedClient"),
+		config:             *config,
+		source:             source,
+		queue:              make([]QueuedMessage, 0, config.MaxQueueSize),
+		lastConnected:      !client.IsClosed(),
+		consecutiveErrors:  0,
+		lastSuccessfulSend: time.Now(),
+		connectionQuality:  "good",
+		ctx:                ctx,
+		cancel:             cancel,
 	}
 
-	// Start the queue processor
+	// Start the adaptive queue processor
 	qc.wg.Add(1)
-	go qc.processQueue()
+	go qc.processQueueAdaptive()
 
-	return qc
+	// Start health monitor if enabled
+	if config.EnableHealthCheck {
+		qc.wg.Add(1)
+		go qc.monitorConnectionHealth()
+	}
+
+	return qc, nil
 }
 
-// processQueue periodically attempts to send queued messages
-func (qc *QueuedClient) processQueue() {
+// processQueueAdaptive uses adaptive backoff based on connection health
+func (qc *QueuedClient) processQueueAdaptive() {
 	defer qc.wg.Done()
 
-	ticker := time.NewTicker(qc.config.FlushInterval)
-	defer ticker.Stop()
+	attempt := 0
+	var timer *time.Timer
 
 	for {
+		// Calculate next flush delay using backoff
+		delay := qc.config.BackoffStrategy.NextDelay(attempt)
+
+		if timer == nil {
+			timer = time.NewTimer(delay)
+		} else {
+			timer.Reset(delay)
+		}
+
 		select {
 		case <-qc.ctx.Done():
+			if timer != nil {
+				timer.Stop()
+			}
 			return
-		case <-ticker.C:
+
+		case <-timer.C:
 			// Check connection state change
 			connected := !qc.client.IsClosed()
 			qc.stateMutex.Lock()
@@ -117,36 +157,69 @@ func (qc *QueuedClient) processQueue() {
 			qc.lastConnected = connected
 			qc.stateMutex.Unlock()
 
-			// If we just reconnected, flush immediately
+			// If we just reconnected, flush immediately and reset backoff
 			if connected && !wasConnected {
 				qc.logger.Info("Connection restored, flushing message queue")
-				qc.flushQueue()
+				attempt = 0 // Reset backoff
+				success := qc.flushQueue()
+				if !success {
+					attempt++
+				}
 			} else if connected {
 				// Regular flush attempt
-				qc.flushQueue()
+				success := qc.flushQueue()
+				if success {
+					// Successful flush, reduce backoff
+					if attempt > 0 {
+						attempt--
+					}
+				} else {
+					// Failed flush, increase backoff
+					attempt++
+					if attempt > 10 {
+						attempt = 10 // Cap at 10 to avoid too long delays
+					}
+				}
+			} else {
+				// Disconnected, moderate backoff
+				if attempt < 5 {
+					attempt++
+				}
+			}
+
+			// Log current backoff state
+			if attempt > 0 {
+				nextDelay := qc.config.BackoffStrategy.NextDelay(attempt)
+				qc.logger.WithFields(log.Fields{
+					"attempt":    attempt,
+					"next_delay": nextDelay,
+					"queue_size": qc.GetQueueSize(),
+				}).Debug("Adaptive backoff applied")
 			}
 		}
 	}
 }
 
 // flushQueue attempts to send all queued messages
-func (qc *QueuedClient) flushQueue() {
+// Returns true if flush was successful (or queue empty), false if errors occurred
+func (qc *QueuedClient) flushQueue() bool {
 	qc.queueMutex.Lock()
 	defer qc.queueMutex.Unlock()
 
 	if len(qc.queue) == 0 {
-		return
+		return true
 	}
 
 	// Check if underlying client is connected
 	if qc.client.IsClosed() {
-		return
+		return false
 	}
 
 	now := time.Now()
 	retained := make([]QueuedMessage, 0)
 	sent := 0
 	expired := 0
+	errors := 0
 
 	for _, msg := range qc.queue {
 		// Check message age
@@ -190,6 +263,7 @@ func (qc *QueuedClient) flushQueue() {
 		}
 
 		if err != nil {
+			errors++
 			msg.Retries++
 			maxRetries := qc.config.MaxRetries
 			if msg.Critical {
@@ -206,6 +280,7 @@ func (qc *QueuedClient) flushQueue() {
 			}
 		} else {
 			sent++
+			qc.updateConnectionHealth(true)
 			qc.logger.WithFields(log.Fields{
 				"type": msg.Type,
 				"age":  age,
@@ -218,13 +293,81 @@ func (qc *QueuedClient) flushQueue() {
 	if sent > 0 || expired > 0 {
 		qc.logger.WithFields(log.Fields{
 			"sent":      sent,
+			"errors":    errors,
 			"expired":   expired,
 			"remaining": len(retained),
 		}).Info("Queue flush completed")
 	}
+
+	// Update consecutive errors for backoff
+	qc.stateMutex.Lock()
+	if errors > 0 {
+		qc.consecutiveErrors++
+	} else {
+		qc.consecutiveErrors = 0
+	}
+	qc.stateMutex.Unlock()
+
+	return errors == 0
 }
 
-// queueMessage adds a message to the queue
+// monitorConnectionHealth periodically checks connection health
+func (qc *QueuedClient) monitorConnectionHealth() {
+	defer qc.wg.Done()
+
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-qc.ctx.Done():
+			return
+		case <-ticker.C:
+			qc.checkConnectionHealth()
+		}
+	}
+}
+
+// checkConnectionHealth assesses connection quality based on recent activity
+func (qc *QueuedClient) checkConnectionHealth() {
+	qc.healthMutex.Lock()
+	defer qc.healthMutex.Unlock()
+
+	timeSinceLastSuccess := time.Since(qc.lastSuccessfulSend)
+
+	var quality string
+	switch {
+	case timeSinceLastSuccess < 10*time.Second:
+		quality = "excellent"
+	case timeSinceLastSuccess < 30*time.Second:
+		quality = "good"
+	case timeSinceLastSuccess < 60*time.Second:
+		quality = "poor"
+	default:
+		quality = "critical"
+	}
+
+	if quality != qc.connectionQuality {
+		qc.logger.WithFields(log.Fields{
+			"old_quality":          qc.connectionQuality,
+			"new_quality":          quality,
+			"time_since_last_send": timeSinceLastSuccess,
+		}).Info("Connection quality changed")
+		qc.connectionQuality = quality
+	}
+}
+
+// updateConnectionHealth updates health metrics after send attempt
+func (qc *QueuedClient) updateConnectionHealth(success bool) {
+	qc.healthMutex.Lock()
+	defer qc.healthMutex.Unlock()
+
+	if success {
+		qc.lastSuccessfulSend = time.Now()
+	}
+}
+
+// queueMessage adds a message to both the local queue and Redis
 func (qc *QueuedClient) queueMessage(msgType string, message any, critical bool) {
 	qc.queueMutex.Lock()
 	defer qc.queueMutex.Unlock()
@@ -249,14 +392,17 @@ func (qc *QueuedClient) queueMessage(msgType string, message any, critical bool)
 		}
 	}
 
-	// Add to queue
-	qc.queue = append(qc.queue, QueuedMessage{
+	// Create queued message
+	queuedMsg := QueuedMessage{
 		Type:      msgType,
 		Message:   message,
 		Timestamp: time.Now(),
 		Retries:   0,
 		Critical:  critical,
-	})
+	}
+
+	// Add to in-memory queue
+	qc.queue = append(qc.queue, queuedMsg)
 
 	qc.logger.WithFields(log.Fields{
 		"type":       msgType,
@@ -277,11 +423,11 @@ func (qc *QueuedClient) isCriticalMessage(msg any) bool {
 		var action string
 		switch m := msg.(type) {
 		case EventMessage:
-			action = string(m.Action)
+			action = m.Action
 		case RequestMessage:
-			action = string(m.Action)
+			action = m.Action
 		case ResponseMessage:
-			action = string(m.Action)
+			action = m.Action
 		default:
 			return false
 		}
@@ -392,7 +538,7 @@ func (qc *QueuedClient) Close() error {
 	qc.queueMutex.Unlock()
 
 	if remaining > 0 {
-		qc.logger.WithField("remaining", remaining).Warn("Closing with messages still queued")
+		qc.logger.WithField("remaining", remaining).Warn("Closing with messages still in queue (will be lost)")
 	}
 
 	return qc.client.Close()
@@ -418,7 +564,7 @@ func (qc *QueuedClient) GetQueueSize() int {
 	return len(qc.queue)
 }
 
-// GetQueueStats returns statistics about the queue
+// GetQueueStats returns enhanced statistics about the queue including Redis metrics
 func (qc *QueuedClient) GetQueueStats() map[string]any {
 	qc.queueMutex.Lock()
 	defer qc.queueMutex.Unlock()
@@ -438,10 +584,22 @@ func (qc *QueuedClient) GetQueueStats() map[string]any {
 		}
 	}
 
+	qc.healthMutex.RLock()
+	quality := qc.connectionQuality
+	lastSend := qc.lastSuccessfulSend
+	qc.healthMutex.RUnlock()
+
+	qc.stateMutex.RLock()
+	consErrors := qc.consecutiveErrors
+	qc.stateMutex.RUnlock()
+
 	stats := map[string]any{
-		"total":    len(qc.queue),
-		"critical": critical,
-		"normal":   normal,
+		"total":                len(qc.queue),
+		"critical":             critical,
+		"normal":               normal,
+		"connection_quality":   quality,
+		"consecutive_errors":   consErrors,
+		"last_successful_send": time.Since(lastSend).String(),
 	}
 
 	if !oldest.IsZero() {
@@ -449,6 +607,13 @@ func (qc *QueuedClient) GetQueueStats() map[string]any {
 	}
 
 	return stats
+}
+
+// GetConnectionQuality returns the current connection quality assessment
+func (qc *QueuedClient) GetConnectionQuality() string {
+	qc.healthMutex.RLock()
+	defer qc.healthMutex.RUnlock()
+	return qc.connectionQuality
 }
 
 // FlushQueueSync synchronously flushes the queue (for testing)

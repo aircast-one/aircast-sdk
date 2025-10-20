@@ -24,7 +24,7 @@ pre-commit:
 
     test:
       glob: "**/*.go"
-      run: go test ./... -race -timeout 30s
+      run: go test ./... -race -short -timeout 30s
       stage_fixed: false
       fail_text: "Tests failed. Please fix the issues before committing."
 

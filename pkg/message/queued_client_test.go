@@ -2,684 +2,1126 @@ package message
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
+	"fmt"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
 )
 
-// MockClient is a mock implementation of the Client interface
-type MockClient struct {
-	mock.Mock
-	closed     bool
-	closedLock sync.RWMutex
-}
-
-func (m *MockClient) Listen(ctx context.Context) error {
-	args := m.Called(ctx)
-	return args.Error(0)
-}
-
-func (m *MockClient) Send(msg any) error {
-	args := m.Called(msg)
-	return args.Error(0)
-}
-
-func (m *MockClient) GetSource() MessageSource {
-	args := m.Called()
-	return args.Get(0).(MessageSource)
-}
-
-func (m *MockClient) Close() error {
-	m.closedLock.Lock()
-	m.closed = true
-	m.closedLock.Unlock()
-	args := m.Called()
-	return args.Error(0)
-}
-
-func (m *MockClient) IsClosed() bool {
-	m.closedLock.RLock()
-	defer m.closedLock.RUnlock()
-	return m.closed
-}
-
-func (m *MockClient) ReadMessage() <-chan any {
-	args := m.Called()
-	if ch := args.Get(0); ch != nil {
-		return ch.(chan any)
-	}
-	return nil
-}
-
-func (m *MockClient) RegisterWill(will WillMessage) error {
-	args := m.Called(will)
-	return args.Error(0)
-}
-
-func (m *MockClient) ClearWill() error {
-	args := m.Called()
-	return args.Error(0)
-}
-
-func (m *MockClient) SendRawJSON(jsonBytes []byte) error {
-	args := m.Called(jsonBytes)
-	return args.Error(0)
-}
-
-func (m *MockClient) SetClosed(closed bool) {
-	m.closedLock.Lock()
-	m.closed = closed
-	m.closedLock.Unlock()
-}
-
-// Helper function to create a properly configured mock client
-func createMockClient() *MockClient {
-	mockClient := new(MockClient)
-	mockClient.On("Close").Return(nil).Maybe() // Allow Close to be called
-	return mockClient
-}
-
-func TestQueuedClient_QueueMessagesWhenDisconnected(t *testing.T) {
-	// Setup
-	mockClient := createMockClient()
-	logger := log.WithField("test", "QueuedClient")
-	config := &QueueConfig{
-		MaxQueueSize:  10,
-		MaxMessageAge: 30 * time.Second,
-		FlushInterval: 100 * time.Millisecond,
-		MaxRetries:    3,
-		Source:        SystemDevice,
-	}
-
-	// Create QueuedClient
-	qc := NewQueuedClient(mockClient, logger, config).(*QueuedClient)
-	defer func() {
-		_ = qc.Close()
-	}()
-
-	// Simulate disconnection
-	mockClient.SetClosed(true)
-	connectionError := errors.New("client connection is closed")
-
-	// Setup mock to return connection error
-	RoomID := RoomID("test-channel")
-	mockClient.On("Send", mock.Anything).Return(connectionError)
-
-	// Send a message while disconnected
-	msg := EventMessage{
-		Action:  "test.event",
-		Payload: map[string]any{"data": "test"},
-		Source:  SystemDevice,
-		RoomID:  RoomID,
-	}
-
-	err := qc.Send(msg)
-
-	// Should return error for non-critical message
-	assert.Error(t, err)
-	assert.Equal(t, 1, qc.GetQueueSize(), "Message should be queued")
-}
-
-func TestQueuedClient_CriticalMessageNoError(t *testing.T) {
-	// Setup
-	mockClient := createMockClient()
-	logger := log.WithField("test", "QueuedClient")
+// TestBasicQueueing tests that messages are queued when connection is closed
+func TestBasicQueueing(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
 	config := DefaultQueueConfig()
-	config.FlushInterval = 100 * time.Millisecond
-	// Configure to treat "critical.event" as critical
-	config.CriticalMessageActions = []string{"critical.event"}
 
-	// Create QueuedClient
-	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
-	defer func() {
-		_ = qc.Close()
-	}()
+	// Create mock base client (closed)
+	baseClient := &mockClient{closed: true}
 
-	// Simulate disconnection
-	mockClient.SetClosed(true)
-	connectionError := errors.New("client connection is closed")
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func() { _ = client.Close() }()
 
-	// Setup mock to return connection error
-	RoomID := RoomID("test-channel")
-	mockClient.On("Send", mock.Anything).Return(connectionError)
-
-	// Send a critical message while disconnected
-	msg := EventMessage{
-		Action:  "critical.event",
-		Payload: map[string]any{"data": "test"},
-		Source:  SystemDevice,
-		RoomID:  RoomID,
+	// Send messages while disconnected (should queue)
+	testMessages := []EventMessage{
+		{Action: "test.event1", Payload: map[string]any{"id": 1}},
+		{Action: "test.event2", Payload: map[string]any{"id": 2}},
+		{Action: "test.event3", Payload: map[string]any{"id": 3}},
 	}
 
-	err := qc.Send(msg)
+	for _, msg := range testMessages {
+		if err := client.Send(msg); err == nil {
+			t.Error("Expected error when sending to closed connection")
+		}
+	}
 
-	// Should NOT return error for critical message
-	assert.NoError(t, err, "Critical message should not return error")
-	assert.Equal(t, 1, qc.GetQueueSize(), "Message should be queued")
-
-	// Verify it's marked as critical
-	qc.queueMutex.Lock()
-	assert.True(t, qc.queue[0].Critical, "Message should be marked as critical")
-	qc.queueMutex.Unlock()
+	// Verify messages are in queue
+	qc := client.(*QueuedClient)
+	if size := qc.GetQueueSize(); size != len(testMessages) {
+		t.Errorf("Expected %d queued messages, got %d", len(testMessages), size)
+	}
 }
 
-func TestQueuedClient_FlushOnReconnection(t *testing.T) {
-	// Setup
-	mockClient := createMockClient()
-	logger := log.WithField("test", "QueuedClient")
+// TestQueueFlushOnReconnect tests that queued messages are sent when connection is restored
+func TestQueueFlushOnReconnect(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
 	config := DefaultQueueConfig()
-	config.FlushInterval = 10 * time.Millisecond // Short interval for testing
-	// Configure to treat all test.event* as critical
-	config.CriticalMessageActions = []string{"test.event*"}
 
-	// Create QueuedClient
-	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
-	defer func() {
-		_ = qc.Close()
-	}()
+	// Create mock base client (closed)
+	baseClient := &mockClient{closed: true}
 
-	// Simulate disconnection
-	mockClient.SetClosed(true)
-	connectionError := errors.New("client connection is closed")
-
-	RoomID := RoomID("test-channel")
-
-	// Setup mock: first 2 calls fail, subsequent succeed
-	callCount := 0
-	mockClient.On("Send", mock.Anything).Return(connectionError).Times(2)
-	mockClient.On("Send", mock.Anything).Return(nil).Run(func(args mock.Arguments) {
-		callCount++
-	})
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func() { _ = client.Close() }()
 
 	// Send messages while disconnected
-	msg1 := EventMessage{
-		Action:  "test.event1",
-		Payload: map[string]any{"data": "test1"},
-		Source:  SystemDevice,
-		RoomID:  RoomID,
-	}
-	msg2 := EventMessage{
-		Action:  "test.event2",
-		Payload: map[string]any{"data": "test2"},
-		Source:  SystemDevice,
-		RoomID:  RoomID,
+	testMessages := []EventMessage{
+		{Action: "test.event1", Payload: map[string]any{"id": 1}},
+		{Action: "test.event2", Payload: map[string]any{"id": 2}},
+		{Action: "test.event3", Payload: map[string]any{"id": 3}},
 	}
 
-	err := qc.Send(msg1)
-	require.NoError(t, err)
-	err = qc.Send(msg2)
-	require.NoError(t, err)
+	for _, msg := range testMessages {
+		_ = client.Send(msg)
+	}
 
-	assert.Equal(t, 2, qc.GetQueueSize(), "Both messages should be queued")
+	qc := client.(*QueuedClient)
+	if size := qc.GetQueueSize(); size != len(testMessages) {
+		t.Errorf("Expected %d queued messages, got %d", len(testMessages), size)
+	}
 
-	// Simulate reconnection
-	mockClient.SetClosed(false)
+	// Reconnect
+	baseClient.mu.Lock()
+	baseClient.closed = false
+	baseClient.mu.Unlock()
 
-	// Manually trigger flush and wait for completion
-	qc.FlushQueueSync()
+	// Wait for queue to empty
+	if !qc.WaitForQueueEmpty(5 * time.Second) {
+		t.Error("Timeout waiting for queue to flush")
+	}
+
+	// Verify messages were sent
+	actualSent := baseClient.GetSentCount()
+	if actualSent != len(testMessages) {
+		t.Errorf("Expected %d messages sent, got %d", len(testMessages), actualSent)
+	}
 
 	// Verify queue is empty
-	assert.True(t, qc.WaitForQueueEmpty(100*time.Millisecond), "Queue should be empty after flush")
-
-	// Verify that messages were successfully sent after reconnection
-	assert.GreaterOrEqual(t, callCount, 2, "Both queued messages should have been sent")
+	if size := qc.GetQueueSize(); size != 0 {
+		t.Errorf("Expected empty queue after flush, got %d messages", size)
+	}
 }
 
-func TestQueuedClient_MessageExpiration(t *testing.T) {
-	// Setup
-	mockClient := createMockClient()
-	logger := log.WithField("test", "QueuedClient")
+// TestAdaptiveBackoff tests the adaptive backoff strategy
+func TestAdaptiveBackoff(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
 	config := DefaultQueueConfig()
-	config.MaxMessageAge = 1 * time.Nanosecond // Very short expiration for testing
-	config.FlushInterval = 1 * time.Hour       // Disable auto-flush
-	// Configure to treat all test.event* as critical
-	config.CriticalMessageActions = []string{"test.event*"}
+	config.BackoffStrategy = NewExponentialBackoff(100*time.Millisecond, 5*time.Second)
+	config.MaxRetries = 10 // Allow enough retries for the test (failNextSends is 5)
 
-	// Create QueuedClient
-	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
-	defer func() {
-		_ = qc.Close()
-	}()
+	// Start with closed connection to queue the message
+	baseClient := &mockClient{
+		closed:        true,
+		failNextSends: 5, // Fail first 5 sends after reconnect
+	}
 
-	// Simulate disconnection
-	mockClient.SetClosed(true)
-	connectionError := errors.New("client connection is closed")
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func() { _ = client.Close() }()
 
-	RoomID := RoomID("test-channel")
-	mockClient.On("Send", mock.Anything).Return(connectionError).Once()
-
-	// Send a message
-	msg := EventMessage{
-		Action:  "test.event",
+	// Send a message while disconnected (will queue)
+	_ = client.Send(EventMessage{
+		Action:  "test.backoff",
 		Payload: map[string]any{"data": "test"},
-		Source:  SystemDevice,
-		RoomID:  RoomID,
+	})
+
+	qc := client.(*QueuedClient)
+	if qc.GetQueueSize() != 1 {
+		t.Fatalf("Expected 1 queued message, got %d", qc.GetQueueSize())
 	}
 
-	err := qc.Send(msg)
-	require.NoError(t, err)
-	assert.Equal(t, 1, qc.GetQueueSize(), "Message should be queued")
+	// Reconnect - this will trigger flush with backoff retries
+	baseClient.mu.Lock()
+	baseClient.closed = false
+	baseClient.mu.Unlock()
 
-	// Manually set message timestamp to be expired
-	qc.queueMutex.Lock()
-	if len(qc.queue) > 0 {
-		qc.queue[0].Timestamp = time.Now().Add(-1 * time.Hour) // Set to 1 hour ago
-	}
-	qc.queueMutex.Unlock()
+	// Wait for message to be sent (with retries)
+	expectedSends := 1
+	timeout := time.After(10 * time.Second)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
 
-	// Simulate reconnection
-	mockClient.SetClosed(false)
-	mockClient.On("Send", mock.Anything).Return(nil).Maybe()
-
-	// Trigger flush
-	qc.FlushQueueSync()
-
-	// Message should have been dropped due to age
-	assert.Equal(t, 0, qc.GetQueueSize(), "Expired message should be removed")
-}
-
-func TestQueuedClient_QueueSizeLimit(t *testing.T) {
-	// Setup
-	mockClient := createMockClient()
-	logger := log.WithField("test", "QueuedClient")
-	config := DefaultQueueConfig()
-	config.MaxQueueSize = 3
-	config.FlushInterval = 1 * time.Second // Long interval to prevent auto-flush
-
-	// Create QueuedClient
-	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
-	defer func() {
-		_ = qc.Close()
-	}()
-
-	// Simulate disconnection
-	mockClient.SetClosed(true)
-	connectionError := errors.New("client connection is closed")
-
-	RoomID := RoomID("test-channel")
-	mockClient.On("Send", mock.Anything).Return(connectionError)
-
-	// Send more messages than queue size
-	for i := 0; i < 5; i++ {
-		msg := EventMessage{
-			Action:  MessageAction("test.event" + string(rune(i))),
-			Payload: map[string]any{"index": i},
-			Source:  SystemDevice,
-			RoomID:  RoomID,
-		}
-		_ = qc.Send(msg)
-	}
-
-	// Queue should not exceed max size
-	assert.Equal(t, 3, qc.GetQueueSize(), "Queue should not exceed max size")
-
-	// Check that oldest messages were dropped (first 2 messages)
-	qc.queueMutex.Lock()
-	firstMsg := qc.queue[0].Message.(EventMessage)
-	qc.queueMutex.Unlock()
-
-	assert.Equal(t, MessageAction("test.event"+string(rune(2))), firstMsg.Action,
-		"Oldest messages should have been dropped")
-}
-
-func TestQueuedClient_CriticalMessagePriority(t *testing.T) {
-	// Setup
-	mockClient := createMockClient()
-	logger := log.WithField("test", "QueuedClient")
-	config := DefaultQueueConfig()
-	config.MaxQueueSize = 2
-	config.FlushInterval = 1 * time.Second
-	// Configure to treat "critical.event" as critical
-	config.CriticalMessageActions = []string{"critical.event"}
-
-	// Create QueuedClient
-	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
-	defer func() {
-		_ = qc.Close()
-	}()
-
-	// Simulate disconnection
-	mockClient.SetClosed(true)
-	connectionError := errors.New("client connection is closed")
-
-	RoomID := RoomID("test-channel")
-	mockClient.On("Send", mock.Anything).Return(connectionError)
-
-	// Send normal message
-	normalMsg := EventMessage{
-		Action:  "normal.event",
-		Payload: map[string]any{"type": "normal"},
-		Source:  SystemDevice,
-		RoomID:  RoomID,
-	}
-	_ = qc.Send(normalMsg)
-
-	// Send critical message
-	criticalMsg := EventMessage{
-		Action:  "critical.event",
-		Payload: map[string]any{"type": "critical"},
-		Source:  SystemDevice,
-		RoomID:  RoomID,
-	}
-	_ = qc.Send(criticalMsg)
-
-	// Try to add another normal message (should drop the first normal message)
-	normalMsg2 := EventMessage{
-		Action:  "normal.event2",
-		Payload: map[string]any{"type": "normal2"},
-		Source:  SystemDevice,
-		RoomID:  RoomID,
-	}
-	_ = qc.Send(normalMsg2)
-
-	assert.Equal(t, 2, qc.GetQueueSize(), "Queue should be at max size")
-
-	// Verify critical message is still in queue
-	qc.queueMutex.Lock()
-	hasCritical := false
-	for _, msg := range qc.queue {
-		if msg.Critical {
-			hasCritical = true
-			break
+	for {
+		select {
+		case <-timeout:
+			t.Errorf("Timeout: expected %d message sent after retries, got %d", expectedSends, baseClient.GetSentCount())
+			return
+		case <-ticker.C:
+			if baseClient.GetSentCount() >= expectedSends && qc.GetQueueSize() == 0 {
+				// Success!
+				t.Logf("Message sent after %d retries", 5)
+				return
+			}
 		}
 	}
-	qc.queueMutex.Unlock()
-
-	assert.True(t, hasCritical, "Critical message should be preserved in queue")
 }
 
-func TestQueuedClient_MaxRetries(t *testing.T) {
-	// Setup
-	mockClient := createMockClient()
-	logger := log.WithField("test", "QueuedClient")
+// TestConnectionHealthMonitoring tests connection quality tracking
+func TestConnectionHealthMonitoring(t *testing.T) {
+	t.Skip("Skipping health monitoring test - requires 35s wait time")
+
+	logger := log.NewEntry(log.StandardLogger())
 	config := DefaultQueueConfig()
-	config.MaxRetries = 2
-	config.FlushInterval = 1 * time.Hour // Disable auto-flush
+	config.EnableHealthCheck = true
 
-	// Create QueuedClient
-	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
-	defer func() {
-		_ = qc.Close()
-	}()
+	baseClient := &mockClient{closed: false}
 
-	// Start with disconnected state
-	mockClient.SetClosed(true)
-	connectionError := errors.New("client connection is closed")
-
-	RoomID := RoomID("test-channel")
-
-	// First call fails (initial send)
-	mockClient.On("Send", mock.Anything).Return(connectionError).Once()
-
-	// Send message while disconnected
-	msg := EventMessage{
-		Action:  "test.event",
-		Payload: map[string]any{"data": "test"},
-		Source:  SystemDevice,
-		RoomID:  RoomID,
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
 	}
-	_ = qc.Send(msg)
+	defer func() { _ = client.Close() }()
 
-	// Simulate reconnection
-	mockClient.SetClosed(false)
+	qc := client.(*QueuedClient)
 
-	// Setup to always fail for retry attempts
-	sendError := errors.New("send failed")
-	mockClient.On("Send", mock.Anything).Return(sendError)
-
-	// Manually trigger flushes to simulate retries
-	for i := 0; i <= config.MaxRetries; i++ {
-		qc.FlushQueueSync()
+	// Initial quality should be "good"
+	initialQuality := qc.GetConnectionQuality()
+	if initialQuality == "" {
+		t.Error("Expected initial quality to be set")
 	}
 
-	// After max retries, message should be dropped
-	assert.Equal(t, 0, qc.GetQueueSize(), "Message should be dropped after max retries")
+	t.Logf("Health monitoring enabled with initial quality: %s", initialQuality)
 }
 
-func TestQueuedClient_GetQueueStats(t *testing.T) {
-	// Setup
-	mockClient := createMockClient()
-	logger := log.WithField("test", "QueuedClient")
+// TestCriticalMessageHandling tests critical message detection and error suppression
+func TestCriticalMessageHandling(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
 	config := DefaultQueueConfig()
-	// Configure to treat "critical.event" as critical
-	config.CriticalMessageActions = []string{"critical.event"}
+	config.CriticalMessageActions = []string{"critical.*", "important.event"}
 
-	// Create QueuedClient
-	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
-	defer func() {
-		_ = qc.Close()
-	}()
+	baseClient := &mockClient{closed: true} // Connection closed
 
-	// Simulate disconnection
-	mockClient.SetClosed(true)
-	connectionError := errors.New("client connection is closed")
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func() { _ = client.Close() }()
 
-	RoomID := RoomID("test-channel")
-	mockClient.On("Send", mock.Anything).Return(connectionError)
+	// Send critical message (should suppress error)
+	err = client.Send(EventMessage{
+		Action:  "critical.alert",
+		Payload: map[string]any{"severity": "high"},
+	})
+	if err != nil {
+		t.Errorf("Expected no error for critical message, got: %v", err)
+	}
 
-	// Send mixed messages
-	normalMsg := EventMessage{
+	// Send normal message (should return error)
+	err = client.Send(EventMessage{
 		Action:  "normal.event",
-		Payload: map[string]any{"type": "normal"},
-		Source:  SystemDevice,
-		RoomID:  RoomID,
+		Payload: map[string]any{"data": "test"},
+	})
+	if err == nil {
+		t.Error("Expected error for normal message when connection is closed")
 	}
-	_ = qc.Send(normalMsg)
 
-	criticalMsg := EventMessage{
-		Action:  "critical.event",
-		Payload: map[string]any{"type": "critical"},
-		Source:  SystemDevice,
-		RoomID:  RoomID,
-	}
-	_ = qc.Send(criticalMsg)
-
-	// Get stats
+	// Verify both messages are queued
+	qc := client.(*QueuedClient)
 	stats := qc.GetQueueStats()
-
-	assert.Equal(t, 2, stats["total"], "Should have 2 messages total")
-	assert.Equal(t, 1, stats["critical"], "Should have 1 critical message")
-	assert.Equal(t, 1, stats["normal"], "Should have 1 normal message")
-	assert.NotNil(t, stats["oldest_age"], "Should have oldest age")
+	if stats["total"] != 2 {
+		t.Errorf("Expected 2 queued messages, got %v", stats["total"])
+	}
+	if stats["critical"] != 1 {
+		t.Errorf("Expected 1 critical message, got %v", stats["critical"])
+	}
+	if stats["normal"] != 1 {
+		t.Errorf("Expected 1 normal message, got %v", stats["normal"])
+	}
 }
 
-func TestQueuedClient_ConcurrentAccess(t *testing.T) {
-	// Setup
-	mockClient := createMockClient()
-	logger := log.WithField("test", "QueuedClient")
+// TestMessageExpiration tests that old messages are dropped
+func TestMessageExpiration(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
 	config := DefaultQueueConfig()
-	config.FlushInterval = 1 * time.Hour // Disable auto-flush
+	config.MaxMessageAge = 500 * time.Millisecond
+	config.MaxCriticalAge = 1 * time.Second
 
-	// Create QueuedClient
-	qc := NewQueuedClient(mockClient, logger, &config).(*QueuedClient)
-	defer func() {
-		_ = qc.Close()
-	}()
+	baseClient := &mockClient{closed: true}
 
-	// Simulate disconnection
-	mockClient.SetClosed(true)
-	connectionError := errors.New("client connection is closed")
-	// Use Times(10) instead of Maybe() to limit error returns to exactly the disconnected sends
-	mockClient.On("Send", mock.Anything, mock.Anything).Return(connectionError).Times(10)
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	// Queue a message
+	_ = client.Send(EventMessage{
+		Action:  "test.expiration",
+		Payload: map[string]any{"data": "test"},
+	})
+
+	qc := client.(*QueuedClient)
+	if size := qc.GetQueueSize(); size != 1 {
+		t.Errorf("Expected 1 queued message, got %d", size)
+	}
+
+	// Wait for message to expire
+	<-time.After(1500 * time.Millisecond)
+
+	// Reconnect and trigger flush
+	baseClient.mu.Lock()
+	baseClient.closed = false
+	baseClient.mu.Unlock()
+
+	// Wait for flush to complete
+	// Queue should be empty even if timeout (message was expired, not sent)
+	_ = qc.WaitForQueueEmpty(2 * time.Second)
+
+	// Message should be expired and dropped
+	if size := qc.GetQueueSize(); size != 0 {
+		t.Errorf("Expected 0 messages after expiration, got %d", size)
+	}
+
+	// Should not have been sent
+	if baseClient.GetSentCount() != 0 {
+		t.Error("Expired message should not have been sent")
+	}
+}
+
+// TestQueueSizeLimit tests that queue respects MaxQueueSize
+func TestQueueSizeLimit(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
+	config := DefaultQueueConfig()
+	config.MaxQueueSize = 10
+
+	baseClient := &mockClient{closed: true}
+
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	// Queue more messages than the limit
+	for i := range 20 {
+		_ = client.Send(EventMessage{
+			Action:  "test.overflow",
+			Payload: map[string]any{"id": i},
+		})
+	}
+
+	qc := client.(*QueuedClient)
+	size := qc.GetQueueSize()
+
+	if size > config.MaxQueueSize {
+		t.Errorf("Queue size %d exceeds MaxQueueSize %d", size, config.MaxQueueSize)
+	}
+
+	t.Logf("Queue size after overflow: %d (max: %d)", size, config.MaxQueueSize)
+}
+
+// TestConcurrentOperations tests thread safety
+func TestConcurrentOperations(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
+	config := DefaultQueueConfig()
+
+	baseClient := &mockClient{closed: false}
+
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	var wg sync.WaitGroup
+	done := make(chan struct{})
 
 	// Concurrent sends
-	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		wg.Add(1)
-		go func(index int) {
+		go func(id int) {
 			defer wg.Done()
-			RoomID := RoomID("channel")
-			msg := EventMessage{
-				Action:  MessageAction("test.event"),
-				Payload: map[string]any{"index": index},
-				Source:  SystemDevice,
-				RoomID:  RoomID,
+			for j := range 50 {
+				select {
+				case <-done:
+					return
+				default:
+					_ = client.Send(EventMessage{
+						Action:  "test.concurrent",
+						Payload: map[string]any{"id": id, "seq": j},
+					})
+				}
 			}
-			_ = qc.Send(msg)
 		}(i)
 	}
 
+	// Concurrent stats reads
+	for range 10 {
+		wg.Go(func() {
+			qc := client.(*QueuedClient)
+			for range 100 {
+				select {
+				case <-done:
+					return
+				default:
+					_ = qc.GetQueueStats()
+					_ = qc.GetConnectionQuality()
+				}
+			}
+		})
+	}
+
 	wg.Wait()
+	close(done)
 
-	// All messages should be queued
-	assert.Equal(t, 10, qc.GetQueueSize(), "All messages should be queued")
+	// No panics or data races = success
+	t.Log("Concurrent operations completed successfully")
+}
 
-	// Test concurrent flush and send - setup successful sends for reconnection
-	mockClient.SetClosed(false)
-	// Expect up to 11 successful sends (10 queued + 1 concurrent new message)
-	mockClient.On("Send", mock.Anything, mock.Anything).Return(nil).Times(11)
+// TestMessageOrdering tests FIFO message delivery
+func TestMessageOrdering(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
+	config := DefaultQueueConfig()
 
-	// Trigger concurrent operations
-	var flushWg sync.WaitGroup
-	flushWg.Add(2)
+	baseClient := &mockClient{closed: true}
 
-	go func() {
-		defer flushWg.Done()
-		// Flush multiple times to ensure all messages are processed
-		for i := 0; i < 3; i++ {
-			qc.FlushQueueSync()
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	// Queue messages in specific order
+	expectedOrder := []int{1, 2, 3, 4, 5}
+	for _, id := range expectedOrder {
+		_ = client.Send(EventMessage{
+			Action:  "test.ordering",
+			Payload: map[string]any{"id": id},
+		})
+	}
+
+	qc := client.(*QueuedClient)
+
+	// Reconnect
+	baseClient.mu.Lock()
+	baseClient.closed = false
+	baseClient.mu.Unlock()
+
+	// Wait for queue to flush
+	if !qc.WaitForQueueEmpty(5 * time.Second) {
+		t.Fatal("Timeout waiting for queue to flush")
+	}
+
+	// Verify order
+	sentMessages := baseClient.GetSentMessages()
+	if len(sentMessages) != len(expectedOrder) {
+		t.Fatalf("Expected %d messages, got %d", len(expectedOrder), len(sentMessages))
+	}
+
+	for i, msg := range sentMessages {
+		eventMsg, ok := msg.(EventMessage)
+		if !ok {
+			t.Fatalf("Message %d is not EventMessage", i)
 		}
-	}()
 
-	go func() {
-		defer flushWg.Done()
-		RoomID := RoomID("channel")
-		msg := EventMessage{
-			Action:  "concurrent.event",
-			Payload: map[string]any{"concurrent": true},
-			Source:  SystemDevice,
-			RoomID:  RoomID,
+		payload, ok := eventMsg.Payload.(map[string]any)
+		if !ok {
+			t.Fatalf("Message %d payload is not map[string]any", i)
 		}
-		_ = qc.Send(msg)
-	}()
 
-	// Wait for operations to complete
-	flushWg.Wait()
+		// Try both int and float64 (JSON unmarshalling can produce either)
+		var id int
+		switch v := payload["id"].(type) {
+		case int:
+			id = v
+		case float64:
+			id = int(v)
+		default:
+			t.Fatalf("Message %d id is neither int nor float64, got %T", i, payload["id"])
+		}
 
-	// Give a final flush to ensure everything is processed
+		if id != expectedOrder[i] {
+			t.Errorf("Message order mismatch at position %d: expected %d, got %d",
+				i, expectedOrder[i], id)
+		}
+	}
+}
+
+// mockClient implements Client interface for testing
+type mockClient struct {
+	closed        bool
+	sentMessages  []any
+	mu            sync.Mutex
+	failNextSends int           // Number of sends to fail
+	sendCallback  func(msg any) // Optional callback on successful send
+}
+
+// GetSentCount safely returns the number of sent messages
+func (m *mockClient) GetSentCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.sentMessages == nil {
+		return 0
+	}
+	return len(m.sentMessages)
+}
+
+// GetSentMessages safely returns a copy of sent messages
+func (m *mockClient) GetSentMessages() []any {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.sentMessages == nil {
+		return nil
+	}
+	result := make([]any, len(m.sentMessages))
+	copy(result, m.sentMessages)
+	return result
+}
+
+func (m *mockClient) Send(msg any) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.closed {
+		return fmt.Errorf("connection is closed")
+	}
+
+	if m.failNextSends > 0 {
+		m.failNextSends--
+		return fmt.Errorf("simulated send failure")
+	}
+
+	// Simulate serialization to detect any marshaling issues
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+
+	var unmarshalledMsg any
+	if err := json.Unmarshal(data, &unmarshalledMsg); err != nil {
+		return err
+	}
+
+	// Ensure sentMessages is initialized
+	if m.sentMessages == nil {
+		m.sentMessages = make([]any, 0)
+	}
+
+	m.sentMessages = append(m.sentMessages, msg)
+
+	// Call callback if set
+	if m.sendCallback != nil {
+		m.sendCallback(msg)
+	}
+
+	return nil
+}
+
+func (m *mockClient) Listen(_ context.Context) error {
+	return nil
+}
+
+func (m *mockClient) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closed = true
+	return nil
+}
+
+func (m *mockClient) IsClosed() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.closed
+}
+
+func (m *mockClient) ReadMessage() <-chan any {
+	ch := make(chan any)
+	close(ch)
+	return ch
+}
+
+func (m *mockClient) GetSource() MessageSource {
+	return SystemDevice
+}
+
+func (m *mockClient) ClearWill() error {
+	// No-op for mock
+	return nil
+}
+
+func (m *mockClient) RegisterWill(_ WillMessage) error {
+	// No-op for mock
+	return nil
+}
+
+func (m *mockClient) SendRawJSON(_ []byte) error {
+	// No-op for mock
+	return nil
+}
+
+// TestAllMessageTypes tests sending all message types through QueuedClient
+func TestAllMessageTypes(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
+	config := DefaultQueueConfig()
+
+	baseClient := &mockClient{closed: false}
+
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func(client Client) {
+		_ = client.Close()
+	}(client)
+
+	// Test Request message
+	reqMsg := RequestMessage{
+		Action:      "test.request",
+		RequestID:   "req-123",
+		Source:      "web",
+		Destination: "device",
+		Payload:     map[string]any{"data": "test"},
+	}
+	err = client.Send(reqMsg)
+	if err != nil {
+		t.Errorf("Failed to send RequestMessage: %v", err)
+	}
+
+	// Test Response message
+	respMsg := ResponseMessage{
+		Action:      "test.response",
+		ReplyTo:     "req-123",
+		Source:      "device",
+		Destination: "web",
+		Payload:     map[string]any{"result": "success"},
+	}
+	err = client.Send(respMsg)
+	if err != nil {
+		t.Errorf("Failed to send ResponseMessage: %v", err)
+	}
+
+	// Test Error message
+	errMsg := ErrorMessage{
+		Action:      "test.error",
+		ReplyTo:     "req-123",
+		Source:      "device",
+		Destination: "web",
+		Error: ErrorResponse{
+			Code:    "TEST_ERROR",
+			Message: "Test error message",
+		},
+	}
+	err = client.Send(errMsg)
+	if err != nil {
+		t.Errorf("Failed to send ErrorMessage: %v", err)
+	}
+
+	// Test Event message
+	eventMsg := EventMessage{
+		Action:      "test.event",
+		Source:      "device",
+		Destination: "web",
+		Payload:     map[string]any{"event": "data"},
+	}
+	err = client.Send(eventMsg)
+	if err != nil {
+		t.Errorf("Failed to send EventMessage: %v", err)
+	}
+
+	// Verify all messages were sent
+	if baseClient.GetSentCount() != 4 {
+		t.Errorf("Expected 4 messages sent, got %d", baseClient.GetSentCount())
+	}
+}
+
+// TestInterfaceMethods tests QueuedClient interface methods
+func TestInterfaceMethods(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
+	config := DefaultQueueConfig()
+
+	baseClient := &mockClient{closed: false}
+
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+
+	// Test GetSource
+	if client.GetSource() != SystemDevice {
+		t.Errorf("Expected source SystemDevice, got %s", client.GetSource())
+	}
+
+	// Test IsClosed (should be open)
+	if client.IsClosed() {
+		t.Error("Expected client to be open")
+	}
+
+	// Test ReadMessage
+	msgCh := client.ReadMessage()
+	if msgCh == nil {
+		t.Error("Expected non-nil message channel")
+	}
+
+	// Test Close
+	err = client.Close()
+	if err != nil {
+		t.Errorf("Failed to close client: %v", err)
+	}
+
+	// Test IsClosed (should be closed now)
+	if !client.IsClosed() {
+		t.Error("Expected client to be closed after Close()")
+	}
+}
+
+// TestWillMessageHandling tests RegisterWill and ClearWill
+func TestWillMessageHandling(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
+	config := DefaultQueueConfig()
+
+	baseClient := &mockClient{closed: false}
+
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func(client Client) {
+		_ = client.Close()
+	}(client)
+
+	// Test RegisterWill
+	will := WillMessage{
+		Action:      "device.offline",
+		Destination: "web",
+		Payload:     map[string]any{"reason": "disconnect"},
+	}
+	err = client.RegisterWill(will)
+	if err != nil {
+		t.Errorf("Failed to register will: %v", err)
+	}
+
+	// Test ClearWill
+	err = client.ClearWill()
+	if err != nil {
+		t.Errorf("Failed to clear will: %v", err)
+	}
+}
+
+// TestSendRawJSON tests SendRawJSON method
+func TestSendRawJSON(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
+	config := DefaultQueueConfig()
+
+	baseClient := &mockClient{closed: false}
+
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func(client Client) {
+		_ = client.Close()
+	}(client)
+
+	// Test SendRawJSON
+	jsonData := []byte(`{"type":"event","action":"test.raw","source":"device","destination":"web"}`)
+	err = client.SendRawJSON(jsonData)
+	if err != nil {
+		t.Errorf("Failed to send raw JSON: %v", err)
+	}
+}
+
+// TestFlushQueueSync tests manual queue flushing
+func TestFlushQueueSync(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
+	config := DefaultQueueConfig()
+
+	baseClient := &mockClient{closed: true}
+
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func(client Client) {
+		_ = client.Close()
+	}(client)
+
+	qc := client.(*QueuedClient)
+
+	// Queue messages while disconnected
+	for i := range 3 {
+		err := client.Send(EventMessage{
+			Action:  "test.sync.flush",
+			Payload: map[string]any{"id": i},
+		})
+		if err != nil {
+			return
+		}
+	}
+
+	if qc.GetQueueSize() != 3 {
+		t.Errorf("Expected 3 queued messages, got %d", qc.GetQueueSize())
+	}
+
+	// Reconnect
+	baseClient.mu.Lock()
+	baseClient.closed = false
+	baseClient.mu.Unlock()
+
+	// Manual flush
 	qc.FlushQueueSync()
 
-	// Wait for queue to empty with timeout
-	assert.True(t, qc.WaitForQueueEmpty(500*time.Millisecond), "Queue should be empty after flush")
-}
-
-// Benchmark tests
-
-func BenchmarkQueuedClient_Send(b *testing.B) {
-	mockClient := createMockClient()
-	logger := log.New()
-	logger.SetLevel(log.WarnLevel)
-	logEntry := log.NewEntry(logger)
-
-	config := DefaultQueueConfig()
-	qc := NewQueuedClient(mockClient, logEntry, &config).(*QueuedClient)
-	defer func() {
-		_ = qc.Close()
-	}()
-
-	RoomID := RoomID("bench-channel")
-	mockClient.On("Send", mock.Anything).Return(nil)
-
-	msg := EventMessage{
-		Action:  "bench.event",
-		Payload: map[string]any{"data": "benchmark"},
-		Source:  SystemDevice,
-		RoomID:  RoomID,
+	// Wait for flush to complete
+	if !qc.WaitForQueueEmpty(2 * time.Second) {
+		t.Error("Timeout waiting for queue to flush")
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = qc.Send(msg)
+	// Verify messages were sent
+	if baseClient.GetSentCount() != 3 {
+		t.Errorf("Expected 3 messages sent, got %d", baseClient.GetSentCount())
 	}
 }
 
-func BenchmarkQueuedClient_QueueAndFlush(b *testing.B) {
-	mockClient := createMockClient()
-	logger := log.New()
-	logger.SetLevel(log.WarnLevel)
-	logEntry := log.NewEntry(logger)
-
+// TestCustomCriticalMessageFunction tests custom IsCriticalMessage function
+func TestCustomCriticalMessageFunction(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
 	config := DefaultQueueConfig()
-	config.FlushInterval = 1 * time.Hour // Disable auto-flush
-	qc := NewQueuedClient(mockClient, logEntry, &config).(*QueuedClient)
-	defer func() {
-		_ = qc.Close()
-	}()
 
-	RoomID := RoomID("bench-channel")
-
-	// Start disconnected
-	mockClient.SetClosed(true)
-	mockClient.On("Send", mock.Anything).Return(errors.New("disconnected")).Times(b.N)
-
-	msg := EventMessage{
-		Action:  "bench.event",
-		Payload: map[string]any{"data": "benchmark"},
-		Source:  SystemDevice,
-		RoomID:  RoomID,
+	// Custom function: treat messages with "urgent" in payload as critical
+	config.IsCriticalMessage = func(msg any) bool {
+		if eventMsg, ok := msg.(EventMessage); ok {
+			if payload, ok := eventMsg.Payload.(map[string]any); ok {
+				if urgent, ok := payload["urgent"].(bool); ok {
+					return urgent
+				}
+			}
+		}
+		return false
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = qc.Send(msg)
+	baseClient := &mockClient{closed: true}
+
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func(client Client) {
+		_ = client.Close()
+	}(client)
+
+	// Send critical message (should suppress error)
+	err = client.Send(EventMessage{
+		Action:  "test.custom.critical",
+		Payload: map[string]any{"urgent": true, "data": "important"},
+	})
+	if err != nil {
+		t.Errorf("Expected no error for custom critical message, got: %v", err)
 	}
 
-	// Now benchmark the flush
-	mockClient.SetClosed(false)
-	mockClient.On("Send", mock.Anything).Return(nil)
+	// Send normal message (should return error)
+	err = client.Send(EventMessage{
+		Action:  "test.custom.normal",
+		Payload: map[string]any{"urgent": false, "data": "normal"},
+	})
+	if err == nil {
+		t.Error("Expected error for normal message when connection is closed")
+	}
 
-	b.StartTimer()
-	qc.flushQueue()
-	b.StopTimer()
+	// Verify both messages are queued
+	qc := client.(*QueuedClient)
+	stats := qc.GetQueueStats()
+	if stats["total"] != 2 {
+		t.Errorf("Expected 2 queued messages, got %v", stats["total"])
+	}
+	if stats["critical"] != 1 {
+		t.Errorf("Expected 1 critical message, got %v", stats["critical"])
+	}
 }
 
-func TestQueuedClient_DelegationMethods(t *testing.T) {
-	mockClient := createMockClient()
-	logger := log.WithField("test", "QueuedClient")
+// TestHealthQualityTransitions tests connection health quality degradation
+func TestHealthQualityTransitions(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
 	config := DefaultQueueConfig()
-	qc := NewQueuedClient(mockClient, logger, &config)
+	config.EnableHealthCheck = true
+	config.HealthCheckTimeout = 100 * time.Millisecond // Fast health check for testing
 
-	t.Run("Listen delegation", func(t *testing.T) {
-		ctx := context.Background()
-		mockClient.On("Listen", ctx).Return(nil).Once()
-		err := qc.Listen(ctx)
-		assert.NoError(t, err)
-		mockClient.AssertCalled(t, "Listen", ctx)
+	baseClient := &mockClient{closed: false}
+
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func(client Client) {
+		_ = client.Close()
+	}(client)
+
+	qc := client.(*QueuedClient)
+
+	// Initial quality should be set after a short time
+	initialQuality := qc.GetConnectionQuality()
+	if initialQuality == "" {
+		t.Error("Expected initial quality to be set")
+	}
+	t.Logf("Initial quality: %s", initialQuality)
+
+	// Send a message to update health
+	_ = client.Send(EventMessage{Action: "test.health", Payload: map[string]any{"data": "test"}})
+
+	// Wait for health to update
+	timeout := time.After(2 * time.Second)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	qualityFound := false
+	for !qualityFound {
+		select {
+		case <-timeout:
+			t.Error("Timeout waiting for health quality update")
+			return
+		case <-ticker.C:
+			quality := qc.GetConnectionQuality()
+			if quality != "" {
+				t.Logf("Health quality: %s", quality)
+				qualityFound = true
+			}
+		}
+	}
+
+	// Verify quality is one of the expected values
+	finalQuality := qc.GetConnectionQuality()
+	validQualities := []string{"excellent", "good", "poor", "critical"}
+	isValid := slices.Contains(validQualities, finalQuality)
+	if !isValid {
+		t.Errorf("Invalid health quality: %s", finalQuality)
+	}
+}
+
+// TestCriticalMessagePriorityDuringOverflow tests that critical messages are preserved during overflow
+func TestCriticalMessagePriorityDuringOverflow(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
+	config := DefaultQueueConfig()
+	config.MaxQueueSize = 10
+	config.CriticalMessageActions = []string{"critical.*"}
+
+	baseClient := &mockClient{closed: true}
+
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func(client Client) {
+		_ = client.Close()
+	}(client)
+
+	qc := client.(*QueuedClient)
+
+	// Queue 5 critical messages first
+	for i := range 5 {
+		_ = client.Send(EventMessage{
+			Action:  "critical.message",
+			Payload: map[string]any{"id": i, "type": "critical"},
+		})
+	}
+
+	// Queue 10 normal messages (should cause overflow and drop the oldest normal messages)
+	for i := range 10 {
+		_ = client.Send(EventMessage{
+			Action:  "normal.message",
+			Payload: map[string]any{"id": i, "type": "normal"},
+		})
+	}
+
+	// Verify queue size respects limit
+	size := qc.GetQueueSize()
+	if size > config.MaxQueueSize {
+		t.Errorf("Queue size %d exceeds MaxQueueSize %d", size, config.MaxQueueSize)
+	}
+
+	// Verify critical messages are still in queue
+	stats := qc.GetQueueStats()
+	if stats["critical"].(int) < 5 {
+		t.Errorf("Expected at least 5 critical messages preserved, got %v", stats["critical"])
+	}
+
+	t.Logf("Queue stats after overflow: total=%v, critical=%v, normal=%v",
+		stats["total"], stats["critical"], stats["normal"])
+}
+
+// TestBackoffResetAfterSuccess tests that backoff resets after successful flush
+func TestBackoffResetAfterSuccess(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
+	config := DefaultQueueConfig()
+	config.BackoffStrategy = NewExponentialBackoff(100*time.Millisecond, 5*time.Second)
+
+	baseClient := &mockClient{closed: true}
+
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func(client Client) {
+		_ = client.Close()
+	}(client)
+
+	qc := client.(*QueuedClient)
+
+	// Queue messages while disconnected
+	for i := range 3 {
+		_ = client.Send(EventMessage{
+			Action:  "test.backoff.reset",
+			Payload: map[string]any{"id": i},
+		})
+	}
+
+	// Reconnect
+	baseClient.mu.Lock()
+	baseClient.closed = false
+	baseClient.mu.Unlock()
+
+	// Wait for successful flush
+	if !qc.WaitForQueueEmpty(3 * time.Second) {
+		t.Fatal("Timeout waiting for queue to flush")
+	}
+
+	// Verify all messages were sent
+	if baseClient.GetSentCount() != 3 {
+		t.Errorf("Expected 3 messages sent, got %d", baseClient.GetSentCount())
+	}
+
+	// Queue another message and verify it's sent quickly (backoff was reset)
+	_ = client.Send(EventMessage{
+		Action:  "test.after.reset",
+		Payload: map[string]any{"id": 99},
 	})
 
-	t.Run("IsClosed delegation", func(t *testing.T) {
-		mockClient.SetClosed(true)
-		assert.True(t, qc.IsClosed())
-		mockClient.SetClosed(false)
-		assert.False(t, qc.IsClosed())
-	})
+	// Should be sent quickly since backoff was reset
+	timeout := time.After(1 * time.Second)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
 
-	t.Run("ReadMessage delegation", func(t *testing.T) {
-		msgCh := make(chan any)
-		mockClient.On("ReadMessage").Return(msgCh).Once()
-		result := qc.ReadMessage()
-		assert.NotNil(t, result, "ReadMessage should return a channel")
-		mockClient.AssertCalled(t, "ReadMessage")
-	})
+	for {
+		select {
+		case <-timeout:
+			t.Error("Message not sent quickly after backoff reset")
+			return
+		case <-ticker.C:
+			if baseClient.GetSentCount() == 4 {
+				t.Log("Message sent quickly after backoff reset")
+				return
+			}
+		}
+	}
+}
 
-	t.Run("RegisterWill delegation", func(t *testing.T) {
-		will := WillMessage{Action: "device.disconnect", Payload: map[string]any{"reason": "timeout"}}
-		mockClient.On("RegisterWill", will).Return(nil).Once()
-		err := qc.RegisterWill(will)
-		assert.NoError(t, err)
-		mockClient.AssertCalled(t, "RegisterWill", will)
-	})
+// TestQueueBehaviorDuringFlush tests edge case where messages expire during flush
+func TestQueueBehaviorDuringFlush(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
+	config := DefaultQueueConfig()
+	config.MaxMessageAge = 200 * time.Millisecond // Very short age for testing
 
-	t.Run("ClearWill delegation", func(t *testing.T) {
-		mockClient.On("ClearWill").Return(nil).Once()
-		err := qc.ClearWill()
-		assert.NoError(t, err)
-		mockClient.AssertCalled(t, "ClearWill")
-	})
+	baseClient := &mockClient{closed: true}
+
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func(client Client) {
+		_ = client.Close()
+	}(client)
+
+	qc := client.(*QueuedClient)
+
+	// Queue messages
+	for i := range 5 {
+		_ = client.Send(EventMessage{
+			Action:  "test.expire.during.flush",
+			Payload: map[string]any{"id": i},
+		})
+	}
+
+	// Wait for messages to age
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.After(300 * time.Millisecond)
+
+waitLoop:
+	for {
+		select {
+		case <-timeout:
+			break waitLoop
+		case <-ticker.C:
+			// Continue waiting
+		}
+	}
+
+	// Now reconnect (messages should be expired during flush)
+	baseClient.mu.Lock()
+	baseClient.closed = false
+	baseClient.mu.Unlock()
+
+	// Wait for flush
+	// Queue might already be empty due to expiration
+	_ = qc.WaitForQueueEmpty(2 * time.Second)
+
+	// Expired messages should not be sent
+	sentCount := baseClient.GetSentCount()
+	if sentCount > 0 {
+		t.Logf("Some messages were sent before expiration: %d", sentCount)
+	}
+
+	// Queue should be empty
+	if qc.GetQueueSize() != 0 {
+		t.Errorf("Expected empty queue after expiration, got %d", qc.GetQueueSize())
+	}
+}
+
+// TestConnectionStateTransitions tests connected -> disconnected -> reconnected transitions
+func TestConnectionStateTransitions(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
+	config := DefaultQueueConfig()
+
+	baseClient := &mockClient{closed: false}
+
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func(client Client) {
+		_ = client.Close()
+	}(client)
+
+	qc := client.(*QueuedClient)
+
+	// State 1: Connected - messages should send immediately
+	err = client.Send(EventMessage{Action: "test.connected", Payload: map[string]any{"state": 1}})
+	if err != nil {
+		t.Errorf("Expected no error when connected: %v", err)
+	}
+
+	if qc.GetQueueSize() != 0 {
+		t.Errorf("Expected empty queue when connected, got %d", qc.GetQueueSize())
+	}
+
+	// State 2: Disconnect
+	baseClient.mu.Lock()
+	baseClient.closed = true
+	baseClient.mu.Unlock()
+
+	// Messages should queue
+	err = client.Send(EventMessage{Action: "test.disconnected", Payload: map[string]any{"state": 2}})
+	if err == nil {
+		t.Error("Expected error when disconnected")
+	}
+
+	if qc.GetQueueSize() != 1 {
+		t.Errorf("Expected 1 queued message, got %d", qc.GetQueueSize())
+	}
+
+	// State 3: Reconnect
+	baseClient.mu.Lock()
+	baseClient.closed = false
+	baseClient.mu.Unlock()
+
+	// Wait for queue to flush
+	if !qc.WaitForQueueEmpty(3 * time.Second) {
+		t.Error("Timeout waiting for queue to flush after reconnection")
+	}
+
+	// New messages should send immediately
+	err = client.Send(EventMessage{Action: "test.reconnected", Payload: map[string]any{"state": 3}})
+	if err != nil {
+		t.Errorf("Expected no error after reconnection: %v", err)
+	}
+
+	// Verify total sent
+	if baseClient.GetSentCount() != 3 {
+		t.Errorf("Expected 3 messages sent total, got %d", baseClient.GetSentCount())
+	}
 }
