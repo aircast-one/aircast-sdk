@@ -70,6 +70,11 @@ type MutableRoomMessage interface {
 	SetRoomID(roomID RoomID)
 }
 
+// RoutableMessage is an interface for messages that can be routed based on destination
+type RoutableMessage interface {
+	GetDestination() MessageDestination
+}
+
 // RequestMessage represents a client request
 type RequestMessage struct {
 	Action       MessageAction     `json:"action"`
@@ -140,6 +145,11 @@ func (m *RequestMessage) SetRoomID(roomID RoomID) {
 	m.RoomID = string(roomID)
 }
 
+// GetDestination implements RoutableMessage interface for RequestMessage
+func (m RequestMessage) GetDestination() MessageDestination {
+	return MessageDestination(m.Destination)
+}
+
 // GetRoomID implements RoomMessage interface for ResponseMessage
 func (m ResponseMessage) GetRoomID() RoomID {
 	return m.RoomID
@@ -148,6 +158,11 @@ func (m ResponseMessage) GetRoomID() RoomID {
 // SetRoomID implements MutableRoomMessage interface for ResponseMessage
 func (m *ResponseMessage) SetRoomID(roomID RoomID) {
 	m.RoomID = roomID
+}
+
+// GetDestination implements RoutableMessage interface for ResponseMessage
+func (m ResponseMessage) GetDestination() MessageDestination {
+	return m.Destination
 }
 
 // GetRoomID implements RoomMessage interface for ErrorMessage
@@ -160,6 +175,11 @@ func (m *ErrorMessage) SetRoomID(roomID RoomID) {
 	m.RoomID = roomID
 }
 
+// GetDestination implements RoutableMessage interface for ErrorMessage
+func (m ErrorMessage) GetDestination() MessageDestination {
+	return m.Destination
+}
+
 // GetRoomID implements RoomMessage interface for EventMessage
 func (m EventMessage) GetRoomID() RoomID {
 	return m.RoomID
@@ -168,6 +188,16 @@ func (m EventMessage) GetRoomID() RoomID {
 // SetRoomID implements MutableRoomMessage interface for EventMessage
 func (m *EventMessage) SetRoomID(roomID RoomID) {
 	m.RoomID = roomID
+}
+
+// GetDestination implements RoutableMessage interface for EventMessage
+func (m EventMessage) GetDestination() MessageDestination {
+	return m.Destination
+}
+
+// GetDestination implements RoutableMessage interface for WillMessage
+func (m WillMessage) GetDestination() MessageDestination {
+	return m.Destination
 }
 
 // SetMessageRoomID sets the room ID on a message if it implements MutableRoomMessage
@@ -186,6 +216,52 @@ func SetMessageRoomID(msg any, roomID RoomID) bool {
 	}
 
 	return false
+}
+
+// ExtractRoomIDFromMessage extracts the room ID from a message if it implements RoomMessage
+// or if it's a raw JSON map. Returns empty string if room ID cannot be extracted.
+func ExtractRoomIDFromMessage(msg any) string {
+	// Try typed messages first
+	if roomMsg, ok := msg.(RoomMessage); ok {
+		return string(roomMsg.GetRoomID())
+	}
+
+	// Handle raw JSON maps (for clients sending untyped messages)
+	if msgMap, ok := msg.(map[string]any); ok {
+		if roomID, ok := msgMap["room_id"].(string); ok {
+			return roomID
+		}
+	}
+
+	return ""
+}
+
+// GetMessageDestination extracts the destination from a message if it implements RoutableMessage
+// or if it's a raw JSON map. Returns empty string if destination cannot be extracted.
+func GetMessageDestination(msg any) MessageDestination {
+	// Try typed messages first
+	if routable, ok := msg.(RoutableMessage); ok {
+		return routable.GetDestination()
+	}
+
+	// Handle raw JSON maps (for clients sending untyped messages)
+	if msgMap, ok := msg.(map[string]any); ok {
+		if dest, ok := msgMap["destination"].(string); ok {
+			return MessageDestination(dest)
+		}
+	}
+
+	return ""
+}
+
+// IsValidDestination checks if a destination is one of the allowed values
+func IsValidDestination(dest MessageDestination) bool {
+	switch dest {
+	case DestinationWeb, DestinationAPI, DestinationDevice, DestinationBroadcast:
+		return true
+	default:
+		return false
+	}
 }
 
 // SessionConfig configures persistent session behavior

@@ -30,7 +30,7 @@ func NewError(code, message string) *HandlerError {
 // Request represents an internal request structure for message handling
 type Request struct {
 	Action       string
-	SessionID    string
+	RoomID       string
 	RequestID    string
 	Source       string // Source of the request (web, api, device)
 	Payload      map[string]any
@@ -40,7 +40,7 @@ type Request struct {
 // EventRequest represents an internal event structure with payload processing
 type EventRequest struct {
 	Action       string
-	SessionID    string
+	RoomID       string
 	Source       string
 	Payload      any
 	TraceContext map[string]string // W3C Trace Context (traceparent, tracestate)
@@ -71,7 +71,7 @@ func CreateFromRequestMessage(reqMsg message.RequestMessage) (*Request, error) {
 
 	return &Request{
 		Action:       reqMsg.Action,
-		SessionID:    reqMsg.RoomID,
+		RoomID:       reqMsg.RoomID,
 		RequestID:    reqMsg.RequestID,
 		Source:       reqMsg.Source,
 		Payload:      payload,

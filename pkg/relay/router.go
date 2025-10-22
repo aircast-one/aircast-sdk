@@ -178,9 +178,9 @@ func (r *Router) sendError(reqMsg *message.RequestMessage, code, msg string) err
 // ProcessEvent processes an event message
 func (r *Router) ProcessEvent(ctx context.Context, m message.EventMessage) error {
 	r.logger.WithFields(map[string]any{
-		"action":     m.Action,
-		"session_id": m.RoomID,
-		"source":     m.Source,
+		"action":  m.Action,
+		"room_id": m.RoomID,
+		"source":  m.Source,
 	}).Debug("Processing event message")
 
 	handlerFunc, exists := r.eventRoutes[m.Action]
@@ -194,7 +194,7 @@ func (r *Router) ProcessEvent(ctx context.Context, m message.EventMessage) error
 	// Create an EventRequest for consistent payload processing
 	eventReq := &EventRequest{
 		Action:       m.Action,
-		SessionID:    m.RoomID,
+		RoomID:       m.RoomID,
 		Payload:      m.Payload,
 		Source:       m.Source,
 		TraceContext: m.TraceContext, // Preserve W3C Trace Context for distributed tracing

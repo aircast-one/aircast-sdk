@@ -41,7 +41,7 @@ func TestTracingMiddleware(t *testing.T) {
 		req := &relay.Request{
 			Action:    "test.action",
 			RequestID: "req-123",
-			SessionID: "session-456",
+			RoomID:    "session-456",
 			Source:    "web",
 		}
 
@@ -158,9 +158,9 @@ func TestEventTracingMiddleware(t *testing.T) {
 
 		// Create test event
 		event := &relay.EventRequest{
-			Action:    "test.event",
-			SessionID: "session-456",
-			Source:    "device",
+			Action: "test.event",
+			RoomID: "session-456",
+			Source: "device",
 		}
 
 		// Execute

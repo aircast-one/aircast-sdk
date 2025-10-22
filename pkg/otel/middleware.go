@@ -29,7 +29,7 @@ func TracingMiddleware(tracer trace.Tracer) relay.Middleware {
 			span.SetAttributes(
 				attribute.String("request.action", req.Action),
 				attribute.String("request.id", req.RequestID),
-				attribute.String("request.session_id", req.SessionID),
+				attribute.String("request.room_id", req.RoomID),
 				attribute.String("request.source", req.Source),
 			)
 
@@ -63,7 +63,7 @@ func EventTracingMiddleware(tracer trace.Tracer) func(relay.EventHandler) relay.
 			// Add event attributes to span
 			span.SetAttributes(
 				attribute.String("event.action", event.Action),
-				attribute.String("event.session_id", event.SessionID),
+				attribute.String("event.room_id", event.RoomID),
 				attribute.String("event.source", event.Source),
 			)
 

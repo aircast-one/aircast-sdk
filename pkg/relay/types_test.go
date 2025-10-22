@@ -27,7 +27,7 @@ func TestCreateFromRequestMessage_Success(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, req)
 	assert.Equal(t, "test.action", req.Action)
-	assert.Equal(t, "session-123", req.SessionID)
+	assert.Equal(t, "session-123", req.RoomID)
 	assert.Equal(t, "req-123", req.RequestID)
 	assert.Equal(t, "device", req.Source)
 	assert.Equal(t, "value1", req.Payload["field1"])

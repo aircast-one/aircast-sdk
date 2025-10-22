@@ -223,7 +223,7 @@ func main() {
 	// Register handlers
 	router.HandleRequest("device.get_status", func(ctx context.Context, req *relay.Request, res relay.ResponseWriter) error {
 		// This request is already traced!
-		// The span contains request.action, request.id, request.session_id, etc.
+		// The span contains request.action, request.id, request.room_id, etc.
 
 		status := getDeviceStatus() // Your logic
 
@@ -242,12 +242,12 @@ The middleware automatically adds the following attributes to spans:
 ### Request Spans
 - `request.action`: The action name
 - `request.id`: The request ID
-- `request.session_id`: The session/channel ID
+- `request.room_id`: The session/channel ID
 - `request.source`: The source of the request (web, device, api)
 
 ### Event Spans
 - `event.action`: The event action name
-- `event.session_id`: The session/channel ID
+- `event.room_id`: The session/channel ID
 - `event.source`: The source of the event
 
 ## Best Practices
