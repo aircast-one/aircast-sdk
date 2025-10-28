@@ -147,7 +147,12 @@ version.dev:
 		DEV_NUM=$$(echo "$(VERSION)" | grep -o 'dev\.[0-9]*' | cut -d. -f2); \
 		NEXT_DEV=$$((DEV_NUM + 1)); \
 	else \
-		BASE_VERSION=$$(echo "$(VERSION)" | sed 's/-alpha\.[0-9]*$$//' | sed 's/-beta\.[0-9]*$$//' | sed 's/-rc\.[0-9]*$$//'); \
+		BASE_VERSION_RAW=$$(echo "$(VERSION)" | sed 's/-alpha\.[0-9]*$$//' | sed 's/-beta\.[0-9]*$$//' | sed 's/-rc\.[0-9]*$$//' | sed 's/^v//'); \
+		MAJOR=$$(echo "$$BASE_VERSION_RAW" | awk -F. '{print $$1}'); \
+		MINOR=$$(echo "$$BASE_VERSION_RAW" | awk -F. '{print $$2}'); \
+		PATCH=$$(echo "$$BASE_VERSION_RAW" | awk -F. '{print $$3}'); \
+		PATCH=$$((PATCH + 1)); \
+		BASE_VERSION="v$$MAJOR.$$MINOR.$$PATCH"; \
 		NEXT_DEV=1; \
 	fi; \
 	while true; do \
