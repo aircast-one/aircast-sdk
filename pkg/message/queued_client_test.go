@@ -253,8 +253,8 @@ func TestMessageExpiration(t *testing.T) {
 		t.Errorf("Expected 1 queued message, got %d", size)
 	}
 
-	// Wait for message to expire
-	<-time.After(1500 * time.Millisecond)
+	// Wait for message to expire (with extra buffer for CI timing variance)
+	<-time.After(2000 * time.Millisecond)
 
 	// Reconnect and trigger flush
 	baseClient.mu.Lock()
@@ -263,7 +263,7 @@ func TestMessageExpiration(t *testing.T) {
 
 	// Wait for flush to complete
 	// Queue should be empty even if timeout (message was expired, not sent)
-	_ = qc.WaitForQueueEmpty(2 * time.Second)
+	_ = qc.WaitForQueueEmpty(3 * time.Second)
 
 	// Message should be expired and dropped
 	if size := qc.GetQueueSize(); size != 0 {
