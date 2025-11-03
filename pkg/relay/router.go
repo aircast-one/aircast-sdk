@@ -8,6 +8,8 @@ import (
 
 	"github.com/pavliha/aircast-sdk/pkg/message"
 	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 // ActionHandler processes an action with the given context and request, returning a response payload or error.
@@ -150,18 +152,27 @@ func (r *Router) ProcessRequest(ctx context.Context, m message.RequestMessage) e
 	}
 
 	r.logger.WithField("action", req.Action).Debug("Request handled successfully")
+
+	// Inject trace context into response to continue distributed trace
+	traceContext := injectTraceContext(ctx)
+
 	return r.client.Send(message.ResponseMessage{
-		Action:      m.Action,
-		Payload:     payload,
-		Source:      r.client.GetSource(),
-		Destination: message.SourceToDestination(m.Source),
-		RoomID:      m.RoomID,
-		ReplyTo:     m.RequestID,
+		Action:       m.Action,
+		Payload:      payload,
+		Source:       r.client.GetSource(),
+		Destination:  message.SourceToDestination(m.Source),
+		RoomID:       m.RoomID,
+		ReplyTo:      m.RequestID,
+		TraceContext: traceContext,
 	})
 }
 
 // sendError sends an error response for a request
 func (r *Router) sendError(reqMsg *message.RequestMessage, code, msg string) error {
+	// Use background context for error responses since we might not have an active span
+	ctx := context.Background()
+	traceContext := injectTraceContext(ctx)
+
 	return r.client.Send(message.ErrorMessage{
 		Action:      reqMsg.Action,
 		Source:      r.client.GetSource(),
@@ -171,7 +182,8 @@ func (r *Router) sendError(reqMsg *message.RequestMessage, code, msg string) err
 			Code:    code,
 			Message: msg,
 		},
-		ReplyTo: reqMsg.RequestID,
+		ReplyTo:      reqMsg.RequestID,
+		TraceContext: traceContext,
 	})
 }
 
@@ -322,4 +334,19 @@ func (r *Router) adaptSingleArgWithErrorFunction(candidate any) ActionHandler {
 		}
 	}
 	return nil
+}
+
+// injectTraceContext extracts trace context from the Go context and
+// returns it as a map suitable for message TraceContext field
+func injectTraceContext(ctx context.Context) map[string]string {
+	propagator := otel.GetTextMapPropagator()
+	carrier := propagation.MapCarrier{}
+
+	propagator.Inject(ctx, carrier)
+
+	if len(carrier) == 0 {
+		return nil
+	}
+
+	return map[string]string(carrier)
 }
