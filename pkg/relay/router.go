@@ -209,6 +209,7 @@ func (r *Router) ProcessEvent(ctx context.Context, m message.EventMessage) error
 		RoomID:       m.RoomID,
 		Payload:      m.Payload,
 		Source:       m.Source,
+		FromMemberID: m.FromMemberID, // Preserve originating member ID for session management
 		TraceContext: m.TraceContext, // Preserve W3C Trace Context for distributed tracing
 	}
 

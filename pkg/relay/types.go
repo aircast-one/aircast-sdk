@@ -33,6 +33,7 @@ type Request struct {
 	RoomID       string
 	RequestID    string
 	Source       string // Source of the request (web, api, device)
+	FromMemberID string // Originating member ID (e.g., web session ID)
 	Payload      map[string]any
 	TraceContext map[string]string // W3C Trace Context (traceparent, tracestate)
 }
@@ -42,6 +43,7 @@ type EventRequest struct {
 	Action       string
 	RoomID       string
 	Source       string
+	FromMemberID string // Originating member ID (e.g., web session ID)
 	Payload      any
 	TraceContext map[string]string // W3C Trace Context (traceparent, tracestate)
 }
@@ -74,6 +76,7 @@ func CreateFromRequestMessage(reqMsg message.RequestMessage) (*Request, error) {
 		RoomID:       reqMsg.RoomID,
 		RequestID:    reqMsg.RequestID,
 		Source:       reqMsg.Source,
+		FromMemberID: reqMsg.FromMemberID, // Preserve originating member ID for session management
 		Payload:      payload,
 		TraceContext: reqMsg.TraceContext, // Preserve W3C Trace Context for distributed tracing
 	}, nil
