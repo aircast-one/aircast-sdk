@@ -127,7 +127,7 @@ func (r *Router) ProcessRequest(ctx context.Context, m message.RequestMessage) e
 		"request_id": m.RequestID,
 		"session_id": m.ChannelID,
 		"source":     m.Source,
-	}).Debug("Processing request message")
+	}).Trace("Processing request message")
 
 	req, err := CreateFromRequestMessage(m)
 	if err != nil {
@@ -141,7 +141,7 @@ func (r *Router) ProcessRequest(ctx context.Context, m message.RequestMessage) e
 		return r.errorSender(ctx, req, "INVALID_REQUEST", fmt.Sprintf("Unknown action %q", req.Action))
 	}
 
-	r.logger.WithField("action", req.Action).Debug("Found handler, executing...")
+	r.logger.WithField("action", req.Action).Trace("Found handler, executing...")
 
 	resp := r.responseFactory(ctx, req, r.logger)
 	if err := handlerFunc(ctx, req, resp); err != nil {
@@ -149,7 +149,7 @@ func (r *Router) ProcessRequest(ctx context.Context, m message.RequestMessage) e
 		return err
 	}
 
-	r.logger.WithField("action", req.Action).Debug("Request handled successfully")
+	r.logger.WithField("action", req.Action).Trace("Request handled successfully")
 	return nil
 }
 
@@ -159,15 +159,15 @@ func (r *Router) ProcessEvent(ctx context.Context, m message.EventMessage) error
 		"action":     m.Action,
 		"session_id": m.ChannelID,
 		"source":     m.Source,
-	}).Debug("Processing event message")
+	}).Trace("Processing event message")
 
 	handlerFunc, exists := r.eventRoutes[m.Action]
 	if !exists {
-		r.logger.WithField("action", m.Action).Debug("No handler registered for event action")
+		r.logger.WithField("action", m.Action).Trace("No handler registered for event action")
 		return nil
 	}
 
-	r.logger.WithField("action", m.Action).Debug("Found event handler, executing...")
+	r.logger.WithField("action", m.Action).Trace("Found event handler, executing...")
 
 	// Create an EventRequest for consistent payload processing
 	eventReq := &EventRequest{
@@ -183,7 +183,7 @@ func (r *Router) ProcessEvent(ctx context.Context, m message.EventMessage) error
 		return err
 	}
 
-	r.logger.WithField("action", m.Action).Debug("Event handled successfully")
+	r.logger.WithField("action", m.Action).Trace("Event handled successfully")
 	return nil
 }
 
