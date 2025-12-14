@@ -239,15 +239,6 @@ func (c *client) Send(msg any, channelId *ChannelID) error {
 			ErrorMessage: m,
 		}
 	case EventMessage:
-		// DEBUG: Log EventMessage before marshaling
-		c.logger.WithFields(log.Fields{
-			"action":      m.Action,
-			"destination": m.Destination,
-			"dest_len":    len(m.Destination),
-			"channel_id":  m.ChannelID,
-			"source":      m.Source,
-		}).Debug("[SDK] Marshaling EventMessage")
-
 		envelope = struct {
 			Type string `json:"type"`
 			EventMessage
