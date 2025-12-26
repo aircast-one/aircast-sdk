@@ -620,3 +620,259 @@ func TestClient_SourceToDestination(t *testing.T) {
 
 	conn.AssertExpectations(t)
 }
+
+// ConcurrentMockConnection captures all sent messages for verification
+// Used for testing concurrent sends with the buffer pool
+type ConcurrentMockConnection struct {
+	messages [][]byte
+	mu       sync.Mutex
+	closed   bool
+}
+
+func NewConcurrentMockConnection() *ConcurrentMockConnection {
+	return &ConcurrentMockConnection{
+		messages: make([][]byte, 0),
+	}
+}
+
+func (c *ConcurrentMockConnection) SendMessage(message []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// Make a copy of the message to verify it wasn't corrupted
+	msgCopy := make([]byte, len(message))
+	copy(msgCopy, message)
+	c.messages = append(c.messages, msgCopy)
+	return nil
+}
+
+func (c *ConcurrentMockConnection) ReadMessage() <-chan []byte {
+	return make(chan []byte)
+}
+
+func (c *ConcurrentMockConnection) Close() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.closed = true
+	return nil
+}
+
+func (c *ConcurrentMockConnection) IsClosed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closed
+}
+
+func (c *ConcurrentMockConnection) GetMessages() [][]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	result := make([][]byte, len(c.messages))
+	copy(result, c.messages)
+	return result
+}
+
+// TestClient_Send_ConcurrentBufferPoolRace tests that concurrent Send calls
+// don't corrupt each other's data due to buffer pool reuse.
+// Run with: go test -race -run TestClient_Send_ConcurrentBufferPoolRace
+func TestClient_Send_ConcurrentBufferPoolRace(t *testing.T) {
+	logger := logrus.NewEntry(logrus.New())
+	conn := NewConcurrentMockConnection()
+
+	config := ClientConfig{
+		Source: SystemDevice,
+	}
+	client := NewClient(logger, conn, config)
+
+	const numGoroutines = 100
+	const messagesPerGoroutine = 50
+
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	// Launch multiple goroutines sending messages concurrently
+	for i := 0; i < numGoroutines; i++ {
+		go func(goroutineID int) {
+			defer wg.Done()
+			for j := 0; j < messagesPerGoroutine; j++ {
+				// Create a unique message for this goroutine/iteration
+				req := RequestMessage{
+					Action:    "concurrent_test",
+					Source:    SystemDevice,
+					RequestID: "req-" + string(rune('A'+goroutineID)) + "-" + string(rune('0'+j%10)),
+					Payload: map[string]any{
+						"goroutine_id": goroutineID,
+						"message_id":   j,
+						"unique_data":  "data_" + string(rune('A'+goroutineID)) + "_" + string(rune('0'+j%10)),
+					},
+				}
+				err := client.Send(req)
+				if err != nil {
+					t.Errorf("Send failed: %v", err)
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Verify all messages were sent
+	messages := conn.GetMessages()
+	expectedCount := numGoroutines * messagesPerGoroutine
+	require.Equal(t, expectedCount, len(messages), "Expected %d messages, got %d", expectedCount, len(messages))
+
+	// Verify each message is valid JSON and not corrupted
+	for i, msg := range messages {
+		var envelope map[string]any
+		err := json.Unmarshal(msg, &envelope)
+		require.NoError(t, err, "Message %d is not valid JSON: %s", i, string(msg))
+
+		// Verify the message has expected structure
+		require.Equal(t, TypeRequest, envelope["type"], "Message %d has wrong type", i)
+		require.Equal(t, "concurrent_test", envelope["action"], "Message %d has wrong action", i)
+
+		// Verify payload is intact
+		payload, ok := envelope["payload"].(map[string]any)
+		require.True(t, ok, "Message %d payload is not a map", i)
+		require.Contains(t, payload, "goroutine_id", "Message %d missing goroutine_id", i)
+		require.Contains(t, payload, "message_id", "Message %d missing message_id", i)
+		require.Contains(t, payload, "unique_data", "Message %d missing unique_data", i)
+	}
+}
+
+// TestClient_RegisterWill_ConcurrentBufferPoolRace tests concurrent RegisterWill calls
+func TestClient_RegisterWill_ConcurrentBufferPoolRace(t *testing.T) {
+	logger := logrus.NewEntry(logrus.New())
+	conn := NewConcurrentMockConnection()
+
+	config := ClientConfig{
+		Source: SystemDevice,
+	}
+	client := NewClient(logger, conn, config)
+
+	const numGoroutines = 50
+	const messagesPerGoroutine = 20
+
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func(goroutineID int) {
+			defer wg.Done()
+			for j := 0; j < messagesPerGoroutine; j++ {
+				will := WillMessage{
+					Action:      "device.status",
+					Destination: DestinationBroadcast,
+					Payload: map[string]any{
+						"goroutine_id": goroutineID,
+						"message_id":   j,
+						"status":       "offline",
+					},
+				}
+				err := client.RegisterWill(will)
+				if err != nil {
+					t.Errorf("RegisterWill failed: %v", err)
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Verify all messages were sent and are valid
+	messages := conn.GetMessages()
+	expectedCount := numGoroutines * messagesPerGoroutine
+	require.Equal(t, expectedCount, len(messages), "Expected %d messages, got %d", expectedCount, len(messages))
+
+	for i, msg := range messages {
+		var envelope map[string]any
+		err := json.Unmarshal(msg, &envelope)
+		require.NoError(t, err, "Message %d is not valid JSON: %s", i, string(msg))
+		require.Equal(t, TypeWill, envelope["type"], "Message %d has wrong type", i)
+	}
+}
+
+// TestClient_Send_MixedConcurrentBufferPoolRace tests mixed Send and RegisterWill
+// to ensure the buffer pool handles different message types correctly
+func TestClient_Send_MixedConcurrentBufferPoolRace(t *testing.T) {
+	logger := logrus.NewEntry(logrus.New())
+	conn := NewConcurrentMockConnection()
+
+	config := ClientConfig{
+		Source: SystemDevice,
+	}
+	client := NewClient(logger, conn, config)
+
+	const numGoroutines = 50
+	const messagesPerGoroutine = 20
+
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines * 2) // Half Send, half RegisterWill
+
+	// Send goroutines
+	for i := 0; i < numGoroutines; i++ {
+		go func(goroutineID int) {
+			defer wg.Done()
+			for j := 0; j < messagesPerGoroutine; j++ {
+				req := RequestMessage{
+					Action:    "mixed_test",
+					Source:    SystemDevice,
+					RequestID: "req-mixed-" + string(rune('A'+goroutineID)),
+					Payload: map[string]any{
+						"type":         "request",
+						"goroutine_id": goroutineID,
+						"message_id":   j,
+					},
+				}
+				_ = client.Send(req)
+			}
+		}(i)
+	}
+
+	// RegisterWill goroutines
+	for i := 0; i < numGoroutines; i++ {
+		go func(goroutineID int) {
+			defer wg.Done()
+			for j := 0; j < messagesPerGoroutine; j++ {
+				will := WillMessage{
+					Action:      "device.will",
+					Destination: DestinationBroadcast,
+					Payload: map[string]any{
+						"type":         "will",
+						"goroutine_id": goroutineID,
+						"message_id":   j,
+					},
+				}
+				_ = client.RegisterWill(will)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Verify all messages were sent and are valid
+	messages := conn.GetMessages()
+	expectedCount := numGoroutines * messagesPerGoroutine * 2
+	require.Equal(t, expectedCount, len(messages), "Expected %d messages, got %d", expectedCount, len(messages))
+
+	requestCount := 0
+	willCount := 0
+
+	for i, msg := range messages {
+		var envelope map[string]any
+		err := json.Unmarshal(msg, &envelope)
+		require.NoError(t, err, "Message %d is not valid JSON: %s", i, string(msg))
+
+		msgType := envelope["type"].(string)
+		switch msgType {
+		case TypeRequest:
+			requestCount++
+		case TypeWill:
+			willCount++
+		default:
+			t.Errorf("Unexpected message type: %s", msgType)
+		}
+	}
+
+	expectedEach := numGoroutines * messagesPerGoroutine
+	require.Equal(t, expectedEach, requestCount, "Expected %d request messages", expectedEach)
+	require.Equal(t, expectedEach, willCount, "Expected %d will messages", expectedEach)
+}

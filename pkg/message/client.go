@@ -248,22 +248,30 @@ func (c *client) Send(msg any) error {
 
 	// Use pooled buffer for better performance
 	buf := bufferPool.Get().(*bytes.Buffer)
-	defer func() {
-		buf.Reset()
-		bufferPool.Put(buf)
-	}()
 
 	encoder := json.NewEncoder(buf)
 	if err := encoder.Encode(envelope); err != nil {
+		buf.Reset()
+		bufferPool.Put(buf)
 		c.logger.WithError(err).Error("Failed to marshal message")
 		return fmt.Errorf("failed to marshal message: %w", err)
 	}
 
 	// Remove the trailing newline that Encoder adds
-	data := buf.Bytes()
-	if len(data) > 0 && data[len(data)-1] == '\n' {
-		data = data[:len(data)-1]
+	bufData := buf.Bytes()
+	dataLen := len(bufData)
+	if dataLen > 0 && bufData[dataLen-1] == '\n' {
+		dataLen--
 	}
+
+	// Copy data before returning buffer to pool to avoid race condition
+	// where buffer could be reused before SendMessage completes
+	data := make([]byte, dataLen)
+	copy(data, bufData[:dataLen])
+
+	// Return buffer to pool immediately after copying
+	buf.Reset()
+	bufferPool.Put(buf)
 
 	return c.conn.SendMessage(data)
 }
@@ -307,22 +315,30 @@ func (c *client) RegisterWill(will WillMessage) error {
 
 	// Use pooled buffer for better performance
 	buf := bufferPool.Get().(*bytes.Buffer)
-	defer func() {
-		buf.Reset()
-		bufferPool.Put(buf)
-	}()
 
 	encoder := json.NewEncoder(buf)
 	if err := encoder.Encode(envelope); err != nil {
+		buf.Reset()
+		bufferPool.Put(buf)
 		c.logger.WithError(err).Error("Failed to marshal will message")
 		return fmt.Errorf("failed to marshal will message: %w", err)
 	}
 
 	// Remove the trailing newline that Encoder adds
-	data := buf.Bytes()
-	if len(data) > 0 && data[len(data)-1] == '\n' {
-		data = data[:len(data)-1]
+	bufData := buf.Bytes()
+	dataLen := len(bufData)
+	if dataLen > 0 && bufData[dataLen-1] == '\n' {
+		dataLen--
 	}
+
+	// Copy data before returning buffer to pool to avoid race condition
+	// where buffer could be reused before SendMessage completes
+	data := make([]byte, dataLen)
+	copy(data, bufData[:dataLen])
+
+	// Return buffer to pool immediately after copying
+	buf.Reset()
+	bufferPool.Put(buf)
 
 	return c.conn.SendMessage(data)
 }
