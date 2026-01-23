@@ -364,11 +364,18 @@ func (c *client) Close() error {
 	return c.conn.Close()
 }
 
-// IsClosed returns whether the client is closed.
+// IsClosed returns whether the client is closed or the underlying connection is unavailable.
+// This allows higher-level components (like QueuedClient) to properly detect when the
+// connection is in a reconnecting state, not just when Close() has been explicitly called.
 func (c *client) IsClosed() bool {
 	c.closeMutex.Lock()
-	defer c.closeMutex.Unlock()
-	return c.closed
+	closed := c.closed
+	c.closeMutex.Unlock()
+
+	// Check both the client's closed flag AND the connection's availability
+	// This is important for reconnecting scenarios where the client isn't closed
+	// but the underlying connection is temporarily unavailable
+	return closed || c.conn.IsClosed()
 }
 
 // SendRawJSON sends pre-serialized JSON bytes directly to the connection

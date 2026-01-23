@@ -53,9 +53,17 @@ func (m *MockConnection) Close() error {
 func (m *MockConnection) IsClosed() bool {
 	m.closeMutex.Lock()
 	defer m.closeMutex.Unlock()
+	// Return the internal closed state - this is tracked by Close() or SetClosed()
+	return m.closed
+}
 
-	args := m.Called()
-	return args.Bool(0)
+// SetClosed sets the closed state without actually closing the channel.
+// This is useful for testing scenarios where the connection becomes unavailable
+// without being explicitly closed.
+func (m *MockConnection) SetClosed(closed bool) {
+	m.closeMutex.Lock()
+	defer m.closeMutex.Unlock()
+	m.closed = closed
 }
 
 func TestNewClient(t *testing.T) {
@@ -421,23 +429,52 @@ func TestClient_Close(t *testing.T) {
 }
 
 func TestClient_IsClosed(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	conn := NewMockConnection()
+	t.Run("returns false when client and connection are open", func(t *testing.T) {
+		logger := logrus.NewEntry(logrus.New())
+		conn := NewMockConnection()
 
-	config := ClientConfig{
-		Source: SystemDevice,
-	}
-	client := NewClient(logger, conn, config)
+		config := ClientConfig{
+			Source: SystemDevice,
+		}
+		client := NewClient(logger, conn, config)
 
-	// Initially not closed
-	assert.False(t, client.IsClosed())
+		// Initially not closed (both client and connection are open)
+		assert.False(t, client.IsClosed())
+	})
 
-	// Close the client
-	conn.On("Close").Return(nil)
-	_ = client.Close()
+	t.Run("returns true when connection is closed but client is not", func(t *testing.T) {
+		logger := logrus.NewEntry(logrus.New())
+		conn := NewMockConnection()
+		conn.SetClosed(true) // Simulate connection becoming unavailable
 
-	// Now should be closed
-	assert.True(t, client.IsClosed())
+		config := ClientConfig{
+			Source: SystemDevice,
+		}
+		client := NewClient(logger, conn, config)
+
+		// Should be closed because connection is unavailable
+		assert.True(t, client.IsClosed())
+	})
+
+	t.Run("returns true after client is explicitly closed", func(t *testing.T) {
+		logger := logrus.NewEntry(logrus.New())
+		conn := NewMockConnection()
+		conn.On("Close").Return(nil)
+
+		config := ClientConfig{
+			Source: SystemDevice,
+		}
+		client := NewClient(logger, conn, config)
+
+		// Initially not closed
+		assert.False(t, client.IsClosed())
+
+		// Close the client
+		_ = client.Close()
+
+		// Now should be closed (client's internal flag is true)
+		assert.True(t, client.IsClosed())
+	})
 }
 
 func TestClient_ReadMessage(t *testing.T) {
