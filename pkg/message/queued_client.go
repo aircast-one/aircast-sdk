@@ -136,6 +136,14 @@ func (qc *QueuedClient) processQueueAdaptive() {
 		// Calculate next flush delay using backoff
 		delay := qc.config.BackoffStrategy.NextDelay(attempt)
 
+		// When connected, cap delay to MaxMessageAge so queued messages
+		// are flushed before they expire. Without this cap, high backoff
+		// (e.g. 30s) causes all messages to expire (MaxMessageAge=10s)
+		// before they can be sent, creating a death spiral.
+		if !qc.client.IsClosed() && delay > qc.config.MaxMessageAge {
+			delay = qc.config.MaxMessageAge
+		}
+
 		if timer == nil {
 			timer = time.NewTimer(delay)
 		} else {
@@ -169,8 +177,11 @@ func (qc *QueuedClient) processQueueAdaptive() {
 				// Regular flush attempt
 				success := qc.flushQueue()
 				if success {
-					// Successful flush, reduce backoff
-					if attempt > 0 {
+					// Queue is drained — reset backoff immediately so fresh
+					// messages are flushed within MaxMessageAge and don't expire.
+					if qc.GetQueueSize() == 0 {
+						attempt = 0
+					} else if attempt > 0 {
 						attempt--
 					}
 				} else {
@@ -482,11 +493,15 @@ func (qc *QueuedClient) Send(msg any) error {
 	err := qc.client.Send(msg)
 
 	if err != nil {
-		// Check if it's a connection error
+		// Check if it's a connection error (including websocket write failures)
 		errStr := err.Error()
 		if qc.client.IsClosed() ||
 			strings.Contains(errStr, "connection is closed") ||
-			strings.Contains(errStr, "connection lost") {
+			strings.Contains(errStr, "connection lost") ||
+			strings.Contains(errStr, "close sent") ||
+			strings.Contains(errStr, "broken pipe") ||
+			strings.Contains(errStr, "connection reset") ||
+			strings.Contains(errStr, "use of closed") {
 
 			// Determine message type
 			msgType := "unknown"
