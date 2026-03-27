@@ -10,6 +10,12 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// Backoff attempt caps
+const (
+	maxFailedAttempts       = 10 // Cap failed flush attempts to avoid unbounded backoff
+	maxDisconnectedAttempts = 5  // Cap disconnected backoff to keep retry interval reasonable
+)
+
 // QueuedMessage represents a message waiting to be sent
 type QueuedMessage struct {
 	Type      string    `json:"type"`
@@ -17,6 +23,32 @@ type QueuedMessage struct {
 	Timestamp time.Time `json:"timestamp"`
 	Retries   int       `json:"retries"`
 	Critical  bool      `json:"critical"`
+}
+
+// connectionErrorSubstrings are error message patterns that indicate a connection
+// failure (as opposed to a message-level error). When matched, messages are queued
+// for retry rather than being dropped.
+var connectionErrorSubstrings = []string{
+	"connection is closed",
+	"connection lost",
+	"close sent",
+	"broken pipe",
+	"connection reset",
+	"use of closed",
+}
+
+// isConnectionError returns true if the error indicates a connection failure.
+func isConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	for _, substr := range connectionErrorSubstrings {
+		if strings.Contains(errStr, substr) {
+			return true
+		}
+	}
+	return false
 }
 
 // QueueConfig configures the in-memory message queue behavior
@@ -169,17 +201,17 @@ func (qc *QueuedClient) processQueueAdaptive() {
 			if connected && !wasConnected {
 				qc.logger.Info("Connection restored, flushing message queue")
 				attempt = 0 // Reset backoff
-				success := qc.flushQueue()
-				if !success {
+				result := qc.flushQueue()
+				if !result.ok {
 					attempt++
 				}
 			} else if connected {
 				// Regular flush attempt
-				success := qc.flushQueue()
-				if success {
+				result := qc.flushQueue()
+				if result.ok {
 					// Queue is drained — reset backoff immediately so fresh
 					// messages are flushed within MaxMessageAge and don't expire.
-					if qc.GetQueueSize() == 0 {
+					if result.remaining == 0 {
 						attempt = 0
 					} else if attempt > 0 {
 						attempt--
@@ -187,13 +219,13 @@ func (qc *QueuedClient) processQueueAdaptive() {
 				} else {
 					// Failed flush, increase backoff
 					attempt++
-					if attempt > 10 {
-						attempt = 10 // Cap at 10 to avoid too long delays
+					if attempt > maxFailedAttempts {
+						attempt = maxFailedAttempts
 					}
 				}
 			} else {
 				// Disconnected, moderate backoff
-				if attempt < 5 {
+				if attempt < maxDisconnectedAttempts {
 					attempt++
 				}
 			}
@@ -211,19 +243,25 @@ func (qc *QueuedClient) processQueueAdaptive() {
 	}
 }
 
-// flushQueue attempts to send all queued messages
-// Returns true if flush was successful (or queue empty), false if errors occurred
-func (qc *QueuedClient) flushQueue() bool {
+// flushResult contains the outcome of a flush attempt.
+type flushResult struct {
+	ok        bool // true if no send errors occurred
+	remaining int  // number of messages still in queue after flush
+}
+
+// flushQueue attempts to send all queued messages.
+// Returns whether the flush succeeded and how many messages remain.
+func (qc *QueuedClient) flushQueue() flushResult {
 	qc.queueMutex.Lock()
 	defer qc.queueMutex.Unlock()
 
 	if len(qc.queue) == 0 {
-		return true
+		return flushResult{ok: true, remaining: 0}
 	}
 
 	// Check if underlying client is connected
 	if qc.client.IsClosed() {
-		return false
+		return flushResult{ok: false, remaining: len(qc.queue)}
 	}
 
 	now := time.Now()
@@ -319,7 +357,7 @@ func (qc *QueuedClient) flushQueue() bool {
 	}
 	qc.stateMutex.Unlock()
 
-	return errors == 0
+	return flushResult{ok: errors == 0, remaining: len(retained)}
 }
 
 // monitorConnectionHealth periodically checks connection health
@@ -494,14 +532,7 @@ func (qc *QueuedClient) Send(msg any) error {
 
 	if err != nil {
 		// Check if it's a connection error (including websocket write failures)
-		errStr := err.Error()
-		if qc.client.IsClosed() ||
-			strings.Contains(errStr, "connection is closed") ||
-			strings.Contains(errStr, "connection lost") ||
-			strings.Contains(errStr, "close sent") ||
-			strings.Contains(errStr, "broken pipe") ||
-			strings.Contains(errStr, "connection reset") ||
-			strings.Contains(errStr, "use of closed") {
+		if qc.client.IsClosed() || isConnectionError(err) {
 
 			// Determine message type
 			msgType := "unknown"

@@ -1125,3 +1125,109 @@ func TestConnectionStateTransitions(t *testing.T) {
 		t.Errorf("Expected 3 messages sent total, got %d", baseClient.GetSentCount())
 	}
 }
+
+// TestBackoffCappedToMaxMessageAge verifies that when the connection is up but
+// backoff has grown large (e.g., after transient failures), the flush delay is
+// capped to MaxMessageAge. Without this cap, messages expire before they can be
+// flushed, creating a death spiral.
+func TestBackoffCappedToMaxMessageAge(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
+	config := DefaultQueueConfig()
+	// Backoff base large enough to exceed MaxMessageAge quickly
+	config.BackoffStrategy = NewExponentialBackoff(2*time.Second, 30*time.Second)
+	config.MaxMessageAge = 500 * time.Millisecond
+
+	baseClient := &mockClient{closed: false}
+
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func(client Client) {
+		_ = client.Close()
+	}(client)
+
+	qc := client.(*QueuedClient)
+
+	// Simulate transient failures to ramp up backoff: disconnect briefly,
+	// send messages (they'll queue), then reconnect.
+	baseClient.mu.Lock()
+	baseClient.closed = true
+	baseClient.mu.Unlock()
+
+	for i := range 3 {
+		_ = client.Send(EventMessage{
+			Action:  "test.ramp.backoff",
+			Payload: map[string]any{"id": i},
+		})
+	}
+
+	// Reconnect — backoff is now elevated
+	baseClient.mu.Lock()
+	baseClient.closed = false
+	baseClient.mu.Unlock()
+
+	// Wait for queued messages to flush
+	if !qc.WaitForQueueEmpty(3 * time.Second) {
+		t.Fatal("Timeout waiting for queue to flush — death spiral likely")
+	}
+
+	// Now the real test: queue a fresh message while connected with high backoff.
+	// Without the cap, the backoff delay (2s+) would exceed MaxMessageAge (500ms),
+	// and the message would expire before it could be flushed.
+	sentBefore := baseClient.GetSentCount()
+	_ = client.Send(EventMessage{
+		Action:  "test.after.high.backoff",
+		Payload: map[string]any{"verify": true},
+	})
+
+	// The message must be sent within MaxMessageAge. If backoff is uncapped,
+	// this would take 2s+ and the message would expire.
+	deadline := time.After(config.MaxMessageAge + 200*time.Millisecond)
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+
+	sent := false
+	for !sent {
+		select {
+		case <-deadline:
+			t.Fatalf("Message not sent within MaxMessageAge (%v) — backoff cap not working. "+
+				"Sent before=%d, after=%d", config.MaxMessageAge, sentBefore, baseClient.GetSentCount())
+		case <-ticker.C:
+			if baseClient.GetSentCount() > sentBefore {
+				sent = true
+			}
+		}
+	}
+}
+
+// TestIsConnectionError verifies the connection error detection function.
+func TestIsConnectionError(t *testing.T) {
+	tests := []struct {
+		err    error
+		expect bool
+	}{
+		{nil, false},
+		{fmt.Errorf("something random"), false},
+		{fmt.Errorf("connection is closed"), true},
+		{fmt.Errorf("write: broken pipe"), true},
+		{fmt.Errorf("use of closed network connection"), true},
+		{fmt.Errorf("connection reset by peer"), true},
+		{fmt.Errorf("close sent"), true},
+		{fmt.Errorf("connection lost"), true},
+		{fmt.Errorf("wrapped: %w", fmt.Errorf("broken pipe")), true},
+	}
+
+	for _, tt := range tests {
+		name := "<nil>"
+		if tt.err != nil {
+			name = tt.err.Error()
+		}
+		t.Run(name, func(t *testing.T) {
+			got := isConnectionError(tt.err)
+			if got != tt.expect {
+				t.Errorf("isConnectionError(%q) = %v, want %v", tt.err, got, tt.expect)
+			}
+		})
+	}
+}
