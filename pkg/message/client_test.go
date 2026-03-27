@@ -57,6 +57,10 @@ func (m *MockConnection) IsClosed() bool {
 	return m.closed
 }
 
+func (m *MockConnection) IsConnectionError(_ error) bool {
+	return false
+}
+
 // SetClosed sets the closed state without actually closing the channel.
 // This is useful for testing scenarios where the connection becomes unavailable
 // without being explicitly closed.
@@ -697,6 +701,10 @@ func (c *ConcurrentMockConnection) IsClosed() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.closed
+}
+
+func (c *ConcurrentMockConnection) IsConnectionError(_ error) bool {
+	return false
 }
 
 func (c *ConcurrentMockConnection) GetMessages() [][]byte {

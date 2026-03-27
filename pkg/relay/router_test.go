@@ -61,6 +61,10 @@ func (m *MockClient) SendRawJSON(jsonBytes []byte) error {
 	return args.Error(0)
 }
 
+func (m *MockClient) IsConnectionError(_ error) bool {
+	return false
+}
+
 // Test helper functions
 
 func createTestRouter() (*Router, *MockClient) {

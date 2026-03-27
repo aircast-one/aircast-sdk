@@ -46,6 +46,10 @@ type Client interface {
 	// SendRawJSON sends pre-serialized JSON bytes directly to the connection
 	// This is useful for forwarding stored messages without re-serialization
 	SendRawJSON(jsonBytes []byte) error
+
+	// IsConnectionError returns true if the error indicates a transport-level
+	// connection failure that should trigger message queuing rather than dropping.
+	IsConnectionError(err error) bool
 }
 
 // Connection represents a WebSocket connection
@@ -54,6 +58,10 @@ type Connection interface {
 	ReadMessage() <-chan []byte
 	Close() error
 	IsClosed() bool
+	// IsConnectionError returns true if the error indicates a transport-level
+	// connection failure (e.g. broken pipe, connection reset). Each transport
+	// adapter implements this using typed error checks rather than string matching.
+	IsConnectionError(err error) bool
 }
 
 type ClientConfig struct {
@@ -387,4 +395,9 @@ func (c *client) SendRawJSON(jsonBytes []byte) error {
 
 	// Send directly without any processing
 	return c.conn.SendMessage(jsonBytes)
+}
+
+// IsConnectionError delegates to the underlying connection's error detection.
+func (c *client) IsConnectionError(err error) bool {
+	return c.conn.IsConnectionError(err)
 }

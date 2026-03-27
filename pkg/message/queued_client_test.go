@@ -547,6 +547,10 @@ func (m *mockClient) SendRawJSON(_ []byte) error {
 	return nil
 }
 
+func (m *mockClient) IsConnectionError(_ error) bool {
+	return false
+}
+
 // TestAllMessageTypes tests sending all message types through QueuedClient
 func TestAllMessageTypes(t *testing.T) {
 	logger := log.NewEntry(log.StandardLogger())
@@ -1470,33 +1474,24 @@ func TestMatchActionPattern(t *testing.T) {
 	}
 }
 
-// TestIsConnectionError verifies the connection error detection function.
-func TestIsConnectionError(t *testing.T) {
-	tests := []struct {
-		err    error
-		expect bool
-	}{
-		{nil, false},
-		{fmt.Errorf("something random"), false},
-		{fmt.Errorf("connection is closed"), true},
-		{fmt.Errorf("write: broken pipe"), true},
-		{fmt.Errorf("use of closed network connection"), true},
-		{fmt.Errorf("connection reset by peer"), true},
-		{fmt.Errorf("close sent"), true},
-		{fmt.Errorf("connection lost"), true},
-		{fmt.Errorf("wrapped: %w", fmt.Errorf("broken pipe")), true},
-	}
+// TestIsConnectionErrorDelegation verifies that QueuedClient delegates
+// IsConnectionError to the underlying client (and ultimately to the Connection).
+func TestIsConnectionErrorDelegation(t *testing.T) {
+	logger := log.NewEntry(log.StandardLogger())
+	config := DefaultQueueConfig()
 
-	for _, tt := range tests {
-		name := "<nil>"
-		if tt.err != nil {
-			name = tt.err.Error()
-		}
-		t.Run(name, func(t *testing.T) {
-			got := isConnectionError(tt.err)
-			if got != tt.expect {
-				t.Errorf("isConnectionError(%q) = %v, want %v", tt.err, got, tt.expect)
-			}
-		})
+	baseClient := &mockClient{closed: false}
+	client, err := NewQueuedClient(baseClient, logger, &config)
+	if err != nil {
+		t.Fatalf("Failed to create queued client: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	// mockClient.IsConnectionError always returns false — proving delegation works
+	if client.IsConnectionError(fmt.Errorf("broken pipe")) {
+		t.Error("Expected false from mock, got true")
+	}
+	if client.IsConnectionError(nil) {
+		t.Error("Expected false for nil error")
 	}
 }

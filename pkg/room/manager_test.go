@@ -234,3 +234,4 @@ func (m *mockClientForRouting) GetSource() message.MessageSource            { re
 func (m *mockClientForRouting) RegisterWill(will message.WillMessage) error { return nil }
 func (m *mockClientForRouting) ClearWill() error                            { return nil }
 func (m *mockClientForRouting) SendRawJSON(jsonBytes []byte) error          { return nil }
+func (m *mockClientForRouting) IsConnectionError(_ error) bool              { return false }

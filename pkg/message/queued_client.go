@@ -25,32 +25,6 @@ type QueuedMessage struct {
 	Critical  bool      `json:"critical"`
 }
 
-// connectionErrorSubstrings are error message patterns that indicate a connection
-// failure (as opposed to a message-level error). When matched, messages are queued
-// for retry rather than being dropped.
-var connectionErrorSubstrings = []string{
-	"connection is closed",
-	"connection lost",
-	"close sent",
-	"broken pipe",
-	"connection reset",
-	"use of closed",
-}
-
-// isConnectionError returns true if the error indicates a connection failure.
-func isConnectionError(err error) bool {
-	if err == nil {
-		return false
-	}
-	errStr := err.Error()
-	for _, substr := range connectionErrorSubstrings {
-		if strings.Contains(errStr, substr) {
-			return true
-		}
-	}
-	return false
-}
-
 // QueueConfig configures the in-memory message queue behavior
 type QueueConfig struct {
 	// Queue behavior
@@ -532,7 +506,7 @@ func (qc *QueuedClient) Send(msg any) error {
 
 	if err != nil {
 		// Check if it's a connection error (including websocket write failures)
-		if qc.client.IsClosed() || isConnectionError(err) {
+		if qc.client.IsClosed() || qc.client.IsConnectionError(err) {
 
 			// Determine message type
 			msgType := "unknown"
@@ -695,4 +669,9 @@ func (qc *QueuedClient) ClearWill() error {
 // SendRawJSON sends pre-serialized JSON bytes directly (delegates to underlying client)
 func (qc *QueuedClient) SendRawJSON(jsonBytes []byte) error {
 	return qc.client.SendRawJSON(jsonBytes)
+}
+
+// IsConnectionError delegates to the underlying client's connection error detection.
+func (qc *QueuedClient) IsConnectionError(err error) bool {
+	return qc.client.IsConnectionError(err)
 }

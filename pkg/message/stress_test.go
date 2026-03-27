@@ -67,6 +67,10 @@ func (c *StressTestConnection) IsClosed() bool {
 	return c.closed
 }
 
+func (c *StressTestConnection) IsConnectionError(_ error) bool {
+	return false
+}
+
 func (c *StressTestConnection) GetSendErrors() int64 {
 	return atomic.LoadInt64(&c.sendErrors)
 }

@@ -32,6 +32,7 @@ func (m *MockClient) ReadMessage() <-chan any                     { return nil }
 func (m *MockClient) RegisterWill(will message.WillMessage) error { return nil }
 func (m *MockClient) ClearWill() error                            { return nil }
 func (m *MockClient) SendRawJSON(jsonBytes []byte) error          { return nil }
+func (m *MockClient) IsConnectionError(_ error) bool              { return false }
 
 func TestRoom_SendResponse(t *testing.T) {
 	client := &MockClient{}

@@ -48,6 +48,10 @@ func (c *BenchmarkConnection) IsClosed() bool {
 	return c.closed
 }
 
+func (c *BenchmarkConnection) IsConnectionError(_ error) bool {
+	return false
+}
+
 // Benchmark sending different message types
 func BenchmarkClientSend(b *testing.B) {
 	logger := logrus.NewEntry(logrus.New())
