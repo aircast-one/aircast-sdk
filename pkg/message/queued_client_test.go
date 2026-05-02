@@ -9,12 +9,13 @@ import (
 	"testing"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	"io"
+	"log/slog"
 )
 
 // TestBasicQueueing tests that messages are queued when connection is closed
 func TestBasicQueueing(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 
 	// Create mock base client (closed)
@@ -48,7 +49,7 @@ func TestBasicQueueing(t *testing.T) {
 
 // TestQueueFlushOnReconnect tests that queued messages are sent when connection is restored
 func TestQueueFlushOnReconnect(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 
 	// Create mock base client (closed)
@@ -100,7 +101,7 @@ func TestQueueFlushOnReconnect(t *testing.T) {
 
 // TestAdaptiveBackoff tests the adaptive backoff strategy
 func TestAdaptiveBackoff(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 	config.BackoffStrategy = NewExponentialBackoff(100*time.Millisecond, 5*time.Second)
 	config.MaxRetries = 10 // Allow enough retries for the test (failNextSends is 5)
@@ -158,7 +159,7 @@ func TestAdaptiveBackoff(t *testing.T) {
 func TestConnectionHealthMonitoring(t *testing.T) {
 	t.Skip("Skipping health monitoring test - requires 35s wait time")
 
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 	config.EnableHealthCheck = true
 
@@ -183,7 +184,7 @@ func TestConnectionHealthMonitoring(t *testing.T) {
 
 // TestCriticalMessageHandling tests critical message detection and error suppression
 func TestCriticalMessageHandling(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 	config.CriticalMessageActions = []string{"critical.*", "important.event"}
 
@@ -229,7 +230,7 @@ func TestCriticalMessageHandling(t *testing.T) {
 
 // TestMessageExpiration tests that old messages are dropped
 func TestMessageExpiration(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 	config.MaxMessageAge = 500 * time.Millisecond
 	config.MaxCriticalAge = 1 * time.Second
@@ -278,7 +279,7 @@ func TestMessageExpiration(t *testing.T) {
 
 // TestQueueSizeLimit tests that queue respects MaxQueueSize
 func TestQueueSizeLimit(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 	config.MaxQueueSize = 10
 
@@ -310,7 +311,7 @@ func TestQueueSizeLimit(t *testing.T) {
 
 // TestConcurrentOperations tests thread safety
 func TestConcurrentOperations(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 
 	baseClient := &mockClient{closed: false}
@@ -368,7 +369,7 @@ func TestConcurrentOperations(t *testing.T) {
 
 // TestMessageOrdering tests FIFO message delivery
 func TestMessageOrdering(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 
 	baseClient := &mockClient{closed: true}
@@ -553,7 +554,7 @@ func (m *mockClient) IsConnectionError(_ error) bool {
 
 // TestAllMessageTypes tests sending all message types through QueuedClient
 func TestAllMessageTypes(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 
 	baseClient := &mockClient{closed: false}
@@ -628,7 +629,7 @@ func TestAllMessageTypes(t *testing.T) {
 
 // TestInterfaceMethods tests QueuedClient interface methods
 func TestInterfaceMethods(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 
 	baseClient := &mockClient{closed: false}
@@ -668,7 +669,7 @@ func TestInterfaceMethods(t *testing.T) {
 
 // TestWillMessageHandling tests RegisterWill and ClearWill
 func TestWillMessageHandling(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 
 	baseClient := &mockClient{closed: false}
@@ -701,7 +702,7 @@ func TestWillMessageHandling(t *testing.T) {
 
 // TestSendRawJSON tests SendRawJSON method
 func TestSendRawJSON(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 
 	baseClient := &mockClient{closed: false}
@@ -724,7 +725,7 @@ func TestSendRawJSON(t *testing.T) {
 
 // TestFlushQueueSync tests manual queue flushing
 func TestFlushQueueSync(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 
 	baseClient := &mockClient{closed: true}
@@ -775,7 +776,7 @@ func TestFlushQueueSync(t *testing.T) {
 
 // TestCustomCriticalMessageFunction tests custom IsCriticalMessage function
 func TestCustomCriticalMessageFunction(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 
 	// Custom function: treat messages with "urgent" in payload as critical
@@ -831,7 +832,7 @@ func TestCustomCriticalMessageFunction(t *testing.T) {
 
 // TestHealthQualityTransitions tests connection health quality degradation
 func TestHealthQualityTransitions(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 	config.EnableHealthCheck = true
 	config.HealthCheckTimeout = 100 * time.Millisecond // Fast health check for testing
@@ -889,7 +890,7 @@ func TestHealthQualityTransitions(t *testing.T) {
 
 // TestCriticalMessagePriorityDuringOverflow tests that critical messages are preserved during overflow
 func TestCriticalMessagePriorityDuringOverflow(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 	config.MaxQueueSize = 10
 	config.CriticalMessageActions = []string{"critical.*"}
@@ -940,7 +941,7 @@ func TestCriticalMessagePriorityDuringOverflow(t *testing.T) {
 
 // TestBackoffResetAfterSuccess tests that backoff resets after successful flush
 func TestBackoffResetAfterSuccess(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 	config.BackoffStrategy = NewExponentialBackoff(100*time.Millisecond, 5*time.Second)
 
@@ -1006,7 +1007,7 @@ func TestBackoffResetAfterSuccess(t *testing.T) {
 
 // TestQueueBehaviorDuringFlush tests edge case where messages expire during flush
 func TestQueueBehaviorDuringFlush(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 	config.MaxMessageAge = 200 * time.Millisecond // Very short age for testing
 
@@ -1068,7 +1069,7 @@ waitLoop:
 
 // TestConnectionStateTransitions tests connected -> disconnected -> reconnected transitions
 func TestConnectionStateTransitions(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 
 	baseClient := &mockClient{closed: false}
@@ -1135,7 +1136,7 @@ func TestConnectionStateTransitions(t *testing.T) {
 // capped to MaxMessageAge. Without this cap, messages expire before they can be
 // flushed, creating a death spiral.
 func TestBackoffCappedToMaxMessageAge(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 	// Backoff base large enough to exceed MaxMessageAge quickly
 	config.BackoffStrategy = NewExponentialBackoff(2*time.Second, 30*time.Second)
@@ -1208,7 +1209,7 @@ func TestBackoffCappedToMaxMessageAge(t *testing.T) {
 // TestCheckConnectionHealthTransitions verifies quality transitions based on
 // time since last successful send.
 func TestCheckConnectionHealthTransitions(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 	config.EnableHealthCheck = false // We'll call checkConnectionHealth manually
 
@@ -1253,7 +1254,7 @@ func TestCheckConnectionHealthTransitions(t *testing.T) {
 // TestSendQueuesOnConnectionError verifies that Send queues messages when the
 // underlying client returns a connection error (not just IsClosed).
 func TestSendQueuesOnConnectionError(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 
 	// Client is "open" but returns connection errors on send
@@ -1291,7 +1292,7 @@ func TestSendQueuesOnConnectionError(t *testing.T) {
 // TestSendQueuesDifferentMessageTypes verifies that all message types are
 // correctly identified and queued when send fails with a connection error.
 func TestSendQueuesDifferentMessageTypes(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 
 	baseClient := &mockClient{closed: true}
@@ -1330,7 +1331,7 @@ func TestSendQueuesDifferentMessageTypes(t *testing.T) {
 // TestFlushResultRemainingAccuracy verifies that flushQueue returns the
 // correct remaining count after a flush with partial failures.
 func TestFlushResultRemainingAccuracy(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 
 	baseClient := &mockClient{closed: true}
@@ -1377,7 +1378,7 @@ func TestFlushResultRemainingAccuracy(t *testing.T) {
 
 // TestFlushResultWithPartialFailure verifies remaining count when some sends fail.
 func TestFlushResultWithPartialFailure(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 
 	baseClient := &mockClient{closed: true}
@@ -1416,7 +1417,7 @@ func TestFlushResultWithPartialFailure(t *testing.T) {
 // TestDisconnectedBackoffCap verifies that backoff during disconnected state
 // is capped at maxDisconnectedAttempts.
 func TestDisconnectedBackoffCap(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 	config.BackoffStrategy = NewExponentialBackoff(10*time.Millisecond, 1*time.Second)
 
@@ -1452,15 +1453,15 @@ func TestMatchActionPattern(t *testing.T) {
 		pattern string
 		expect  bool
 	}{
-		{"mavlink.connect", "mavlink.connect", true},   // exact match
-		{"mavlink.connect", "mavlink.*", true},          // prefix match
-		{"mavlink.connect", "sfu.*", false},             // no match
-		{"sfu.publish", "sfu.*", true},                  // prefix match
-		{"sfu.publish", "sfu.publish", true},             // exact match
-		{"sfu.publish", "sfu.subscribe", false},          // different action
-		{"webrtc.offer", "webrtc*", true},               // prefix without dot
-		{"", "mavlink.*", false},                         // empty action
-		{"mavlink.connect", "", false},                   // empty pattern
+		{"mavlink.connect", "mavlink.connect", true}, // exact match
+		{"mavlink.connect", "mavlink.*", true},       // prefix match
+		{"mavlink.connect", "sfu.*", false},          // no match
+		{"sfu.publish", "sfu.*", true},               // prefix match
+		{"sfu.publish", "sfu.publish", true},         // exact match
+		{"sfu.publish", "sfu.subscribe", false},      // different action
+		{"webrtc.offer", "webrtc*", true},            // prefix without dot
+		{"", "mavlink.*", false},                     // empty action
+		{"mavlink.connect", "", false},               // empty pattern
 	}
 
 	for _, tt := range tests {
@@ -1477,7 +1478,7 @@ func TestMatchActionPattern(t *testing.T) {
 // TestIsConnectionErrorDelegation verifies that QueuedClient delegates
 // IsConnectionError to the underlying client (and ultimately to the Connection).
 func TestIsConnectionErrorDelegation(t *testing.T) {
-	logger := log.NewEntry(log.StandardLogger())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	config := DefaultQueueConfig()
 
 	baseClient := &mockClient{closed: false}

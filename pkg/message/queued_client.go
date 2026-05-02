@@ -3,11 +3,10 @@ package message
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
-
-	log "github.com/sirupsen/logrus"
 )
 
 // Backoff attempt caps
@@ -61,7 +60,7 @@ func DefaultQueueConfig() QueueConfig {
 // QueuedClient wraps a Client with in-memory message queuing, adaptive backoff, and health monitoring
 type QueuedClient struct {
 	client Client
-	logger *log.Entry
+	logger *slog.Logger
 	config QueueConfig
 	source MessageSource
 
@@ -86,7 +85,7 @@ type QueuedClient struct {
 }
 
 // NewQueuedClient creates a new client with in-memory message queuing, adaptive backoff, and health monitoring
-func NewQueuedClient(client Client, logger *log.Entry, config *QueueConfig) (Client, error) {
+func NewQueuedClient(client Client, logger *slog.Logger, config *QueueConfig) (Client, error) {
 	if config == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -106,7 +105,7 @@ func NewQueuedClient(client Client, logger *log.Entry, config *QueueConfig) (Cli
 
 	qc := &QueuedClient{
 		client:             client,
-		logger:             logger.WithField("component", "QueuedClient"),
+		logger:             logger.With("component", "QueuedClient"),
 		config:             *config,
 		source:             source,
 		queue:              make([]QueuedMessage, 0, config.MaxQueueSize),
@@ -207,11 +206,11 @@ func (qc *QueuedClient) processQueueAdaptive() {
 			// Log current backoff state
 			if attempt > 0 {
 				nextDelay := qc.config.BackoffStrategy.NextDelay(attempt)
-				qc.logger.WithFields(log.Fields{
-					"attempt":    attempt,
-					"next_delay": nextDelay,
-					"queue_size": qc.GetQueueSize(),
-				}).Debug("Adaptive backoff applied")
+				qc.logger.Debug("Adaptive backoff applied",
+					"attempt", attempt,
+					"next_delay", nextDelay,
+					"queue_size", qc.GetQueueSize(),
+				)
 			}
 		}
 	}
@@ -254,15 +253,15 @@ func (qc *QueuedClient) flushQueue() flushResult {
 
 		if age > maxAge {
 			expired++
-			level := "Debug"
+			level := slog.LevelDebug
 			if msg.Critical {
-				level = "Warn"
+				level = slog.LevelWarn
 			}
-			qc.logWithLevel(level, "Dropping expired message", log.Fields{
-				"age":      age,
-				"critical": msg.Critical,
-				"type":     msg.Type,
-			})
+			qc.logWithLevel(level, "Dropping expired message",
+				"age", age,
+				"critical", msg.Critical,
+				"type", msg.Type,
+			)
 			continue
 		}
 
@@ -296,30 +295,30 @@ func (qc *QueuedClient) flushQueue() flushResult {
 			if msg.Retries < maxRetries {
 				retained = append(retained, msg)
 			} else {
-				qc.logger.WithFields(log.Fields{
-					"type":    msg.Type,
-					"retries": msg.Retries,
-				}).Warn("Dropping message after max retries")
+				qc.logger.Warn("Dropping message after max retries",
+					"type", msg.Type,
+					"retries", msg.Retries,
+				)
 			}
 		} else {
 			sent++
 			qc.updateConnectionHealth(true)
-			qc.logger.WithFields(log.Fields{
-				"type": msg.Type,
-				"age":  age,
-			}).Debug("Successfully sent queued message")
+			qc.logger.Debug("Successfully sent queued message",
+				"type", msg.Type,
+				"age", age,
+			)
 		}
 	}
 
 	qc.queue = retained
 
 	if sent > 0 || expired > 0 {
-		qc.logger.WithFields(log.Fields{
-			"sent":      sent,
-			"errors":    errors,
-			"expired":   expired,
-			"remaining": len(retained),
-		}).Info("Queue flush completed")
+		qc.logger.Info("Queue flush completed",
+			"sent", sent,
+			"errors", errors,
+			"expired", expired,
+			"remaining", len(retained),
+		)
 	}
 
 	// Update consecutive errors for backoff
@@ -371,11 +370,11 @@ func (qc *QueuedClient) checkConnectionHealth() {
 	}
 
 	if quality != qc.connectionQuality {
-		qc.logger.WithFields(log.Fields{
-			"old_quality":          qc.connectionQuality,
-			"new_quality":          quality,
-			"time_since_last_send": timeSinceLastSuccess,
-		}).Info("Connection quality changed")
+		qc.logger.Info("Connection quality changed",
+			"old_quality", qc.connectionQuality,
+			"new_quality", quality,
+			"time_since_last_send", timeSinceLastSuccess,
+		)
 		qc.connectionQuality = quality
 	}
 }
@@ -427,11 +426,11 @@ func (qc *QueuedClient) queueMessage(msgType string, message any, critical bool)
 	// Add to in-memory queue
 	qc.queue = append(qc.queue, queuedMsg)
 
-	qc.logger.WithFields(log.Fields{
-		"type":       msgType,
-		"queue_size": len(qc.queue),
-		"critical":   critical,
-	}).Debug("Message queued")
+	qc.logger.Debug("Message queued",
+		"type", msgType,
+		"queue_size", len(qc.queue),
+		"critical", critical,
+	)
 }
 
 // isCriticalMessage determines if a message is critical using the configured function or list
@@ -483,20 +482,8 @@ func matchActionPattern(action, pattern string) bool {
 }
 
 // logWithLevel logs with the specified level
-func (qc *QueuedClient) logWithLevel(level string, msg string, fields log.Fields) {
-	entry := qc.logger.WithFields(fields)
-	switch level {
-	case "Debug":
-		entry.Debug(msg)
-	case "Info":
-		entry.Info(msg)
-	case "Warn":
-		entry.Warn(msg)
-	case "Error":
-		entry.Error(msg)
-	default:
-		entry.Info(msg)
-	}
+func (qc *QueuedClient) logWithLevel(level slog.Level, msg string, attrs ...any) {
+	qc.logger.Log(context.Background(), level, msg, attrs...)
 }
 
 // Send attempts to send a message, queuing it if the connection is down
@@ -527,10 +514,10 @@ func (qc *QueuedClient) Send(msg any) error {
 
 			// Return nil for critical messages to prevent upstream errors
 			if critical {
-				qc.logger.WithFields(log.Fields{
-					"type":     msgType,
-					"critical": true,
-				}).Info("Critical message queued, suppressing error")
+				qc.logger.Info("Critical message queued, suppressing error",
+					"type", msgType,
+					"critical", true,
+				)
 				return nil
 			}
 		}
@@ -558,7 +545,7 @@ func (qc *QueuedClient) Close() error {
 	qc.queueMutex.Unlock()
 
 	if remaining > 0 {
-		qc.logger.WithField("remaining", remaining).Warn("Closing with messages still in queue (will be lost)")
+		qc.logger.Warn("Closing with messages still in queue (will be lost)", "remaining", remaining)
 	}
 
 	return qc.client.Close()

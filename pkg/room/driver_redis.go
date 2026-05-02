@@ -4,11 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"github.com/pavliha/aircast-sdk/pkg/message"
 	"github.com/redis/go-redis/v9"
-	"github.com/sirupsen/logrus"
 )
 
 // RedisDriver is a Redis-backed implementation of the Driver interface
@@ -16,7 +16,7 @@ type RedisDriver struct {
 	client     *redis.Client
 	rooms      map[message.RoomID]*redisRoom
 	roomsMutex sync.RWMutex
-	logger     *logrus.Entry
+	logger     *slog.Logger
 	ctx        context.Context
 	cancel     context.CancelFunc
 }
@@ -29,12 +29,12 @@ type redisRoom struct {
 }
 
 // NewRedisDriver creates a new Redis-backed driver
-func NewRedisDriver(client *redis.Client, logger *logrus.Entry) *RedisDriver {
+func NewRedisDriver(client *redis.Client, logger *slog.Logger) *RedisDriver {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &RedisDriver{
 		client: client,
 		rooms:  make(map[message.RoomID]*redisRoom),
-		logger: logger.WithField("driver", "redis"),
+		logger: logger.With("driver", "redis"),
 		ctx:    ctx,
 		cancel: cancel,
 	}
@@ -71,12 +71,12 @@ func (d *RedisDriver) Subscribe(roomID message.RoomID, subscriberID string, buff
 	ch := make(chan message.GenericMessage, bufferSize)
 	room.subscribers[subscriberID] = ch
 
-	d.logger.WithFields(logrus.Fields{
-		"room":        roomID,
-		"subscriber":  subscriberID,
-		"buffer_size": bufferSize,
-		"total_subs":  len(room.subscribers),
-	}).Debug("Subscriber added to room")
+	d.logger.Debug("Subscriber added to room",
+		"room", roomID,
+		"subscriber", subscriberID,
+		"buffer_size", bufferSize,
+		"total_subs", len(room.subscribers),
+	)
 
 	return ch, nil
 }
@@ -97,11 +97,11 @@ func (d *RedisDriver) Unsubscribe(roomID message.RoomID, subscriberID string) {
 		close(ch)
 		delete(room.subscribers, subscriberID)
 
-		d.logger.WithFields(logrus.Fields{
-			"room":       roomID,
-			"subscriber": subscriberID,
-			"total_subs": len(room.subscribers),
-		}).Debug("Subscriber removed from room")
+		d.logger.Debug("Subscriber removed from room",
+			"room", roomID,
+			"subscriber", subscriberID,
+			"total_subs", len(room.subscribers),
+		)
 	}
 
 	// If no more subscribers, clean up the room
@@ -118,14 +118,14 @@ func (d *RedisDriver) Publish(roomID message.RoomID, msg message.GenericMessage)
 	// Serialize message to JSON
 	data, err := json.Marshal(msg)
 	if err != nil {
-		d.logger.WithError(err).Error("Failed to marshal message")
+		d.logger.Error("Failed to marshal message", "error", err)
 		return
 	}
 
 	// Publish to Redis
 	channel := d.roomChannel(roomID)
 	if err := d.client.Publish(d.ctx, channel, data).Err(); err != nil {
-		d.logger.WithError(err).WithField("room", roomID).Error("Failed to publish message to Redis")
+		d.logger.Error("Failed to publish message to Redis", "error", err, "room", roomID)
 	}
 }
 
@@ -177,7 +177,7 @@ func (d *RedisDriver) startRoomListener(roomID message.RoomID, room *redisRoom) 
 	// Start listening in a goroutine
 	go d.listenToRoom(ctx, roomID, room)
 
-	d.logger.WithField("room", roomID).Debug("Started Redis listener for room")
+	d.logger.Debug("Started Redis listener for room", "room", roomID)
 	return nil
 }
 
@@ -189,14 +189,14 @@ func (d *RedisDriver) listenToRoom(ctx context.Context, roomID message.RoomID, r
 		select {
 		case msg, ok := <-ch:
 			if !ok {
-				d.logger.WithField("room", roomID).Debug("Redis channel closed")
+				d.logger.Debug("Redis channel closed", "room", roomID)
 				return
 			}
 
 			// Deserialize message
 			var genericMsg message.GenericMessage
 			if err := json.Unmarshal([]byte(msg.Payload), &genericMsg); err != nil {
-				d.logger.WithError(err).Error("Failed to unmarshal message from Redis")
+				d.logger.Error("Failed to unmarshal message from Redis", "error", err)
 				continue
 			}
 
@@ -204,7 +204,7 @@ func (d *RedisDriver) listenToRoom(ctx context.Context, roomID message.RoomID, r
 			d.forwardToSubscribers(roomID, room, genericMsg)
 
 		case <-ctx.Done():
-			d.logger.WithField("room", roomID).Debug("Room listener context cancelled")
+			d.logger.Debug("Room listener context cancelled", "room", roomID)
 			return
 		}
 	}
@@ -220,10 +220,10 @@ func (d *RedisDriver) forwardToSubscribers(roomID message.RoomID, room *redisRoo
 		case ch <- msg:
 			// Message sent successfully
 		default:
-			d.logger.WithFields(logrus.Fields{
-				"room":       roomID,
-				"subscriber": subID,
-			}).Warn("Subscriber channel full, dropping message")
+			d.logger.Warn("Subscriber channel full, dropping message",
+				"room", roomID,
+				"subscriber", subID,
+			)
 		}
 	}
 }
@@ -238,7 +238,7 @@ func (d *RedisDriver) cleanupRoom(roomID message.RoomID, room *redisRoom) {
 	}
 	delete(d.rooms, roomID)
 
-	d.logger.WithField("room", roomID).Debug("Cleaned up room")
+	d.logger.Debug("Cleaned up room", "room", roomID)
 }
 
 // cleanupRoomNoLock cleans up a room without acquiring the rooms mutex (caller must hold lock)
@@ -246,10 +246,10 @@ func (d *RedisDriver) cleanupRoomNoLock(roomID message.RoomID, room *redisRoom) 
 	room.subMutex.Lock()
 	for subID, ch := range room.subscribers {
 		close(ch)
-		d.logger.WithFields(logrus.Fields{
-			"room":       roomID,
-			"subscriber": subID,
-		}).Debug("Closed subscriber channel")
+		d.logger.Debug("Closed subscriber channel",
+			"room", roomID,
+			"subscriber", subID,
+		)
 	}
 	room.subscribers = make(map[string]chan message.GenericMessage)
 	room.subMutex.Unlock()

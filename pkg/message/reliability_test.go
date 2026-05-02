@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"io"
+	"log/slog"
 )
 
 // TestGoroutineLeaks verifies that no goroutines are leaked
@@ -23,8 +24,7 @@ func TestGoroutineLeaks(t *testing.T) {
 
 	t.Run("Listen goroutine cleanup", func(t *testing.T) {
 		for i := 0; i < 10; i++ {
-			logger := logrus.NewEntry(logrus.New())
-			logger.Logger.SetLevel(logrus.ErrorLevel)
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			conn := NewMockConnection()
 			conn.On("ReadMessage").Return()
 			conn.On("Close").Return(nil)
@@ -71,8 +71,7 @@ func TestGoroutineLeaks(t *testing.T) {
 	t.Run("Multiple client cleanup", func(t *testing.T) {
 		var clients []Client
 		for i := 0; i < 20; i++ {
-			logger := logrus.NewEntry(logrus.New())
-			logger.Logger.SetLevel(logrus.ErrorLevel)
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			conn := NewMockConnection()
 			conn.On("Close").Return(nil)
 
@@ -103,8 +102,7 @@ func TestGoroutineLeaks(t *testing.T) {
 // TestMessageReliability ensures no messages are lost or stuck
 func TestMessageReliability(t *testing.T) {
 	t.Run("No message loss under load", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
-		logger.Logger.SetLevel(logrus.ErrorLevel)
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 		conn.On("ReadMessage").Return()
 		conn.On("Close").Return(nil)
@@ -161,8 +159,7 @@ func TestMessageReliability(t *testing.T) {
 	})
 
 	t.Run("Channel buffer overflow handling", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
-		logger.Logger.SetLevel(logrus.ErrorLevel)
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 		conn.On("ReadMessage").Return()
 		conn.On("Close").Return(nil)
@@ -216,8 +213,7 @@ func TestMessageReliability(t *testing.T) {
 	})
 
 	t.Run("No stuck messages", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
-		logger.Logger.SetLevel(logrus.ErrorLevel)
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 		conn.On("ReadMessage").Return()
 		conn.On("Close").Return(nil)
@@ -260,8 +256,7 @@ func TestMessageReliability(t *testing.T) {
 
 // TestConcurrentSendReliability ensures thread safety
 func TestConcurrentSendReliability(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// Track sent messages
 	var sentCount int64
@@ -315,8 +310,7 @@ func TestConcurrentSendReliability(t *testing.T) {
 // TestClientCloseRaceCondition tests for race conditions during close
 func TestClientCloseRaceCondition(t *testing.T) {
 	for i := 0; i < 100; i++ {
-		logger := logrus.NewEntry(logrus.New())
-		logger.Logger.SetLevel(logrus.ErrorLevel)
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 		conn.On("SendMessage", mock.Anything).Return(nil).Maybe()
 		conn.On("Close").Return(nil)
@@ -378,8 +372,7 @@ func TestClientCloseRaceCondition(t *testing.T) {
 
 // TestMessageChannelDeadlock tests for potential deadlocks
 func TestMessageChannelDeadlock(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	conn := NewMockConnection()
 	conn.On("ReadMessage").Return()
 	conn.On("Close").Return(nil)
@@ -439,8 +432,7 @@ func TestMemoryLeaks(t *testing.T) {
 		t.Skip("Skipping memory leak test in short mode")
 	}
 
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	conn := NewMockConnection()
 	conn.On("SendMessage", mock.Anything).Return(nil)
 	conn.On("IsClosed").Return(false)
@@ -523,8 +515,7 @@ func TestMemoryLeaks(t *testing.T) {
 
 // BenchmarkMessageReliability benchmarks message processing reliability
 func BenchmarkMessageReliability(b *testing.B) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	conn := NewMockConnection()
 	conn.On("ReadMessage").Return()
 	conn.On("Close").Return(nil)

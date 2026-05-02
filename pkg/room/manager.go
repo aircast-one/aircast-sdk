@@ -3,26 +3,27 @@ package room
 import (
 	"context"
 
+	"log/slog"
+
 	"github.com/pavliha/aircast-sdk/pkg/message"
-	"github.com/sirupsen/logrus"
 )
 
 // RoomManager manages subscriptions and routes messages to room subscribers
 type RoomManager struct {
 	driver Driver
-	logger *logrus.Entry
+	logger *slog.Logger
 }
 
 // NewRoomManager creates a new RoomManager with the specified driver
-func NewRoomManager(driver Driver, logger *logrus.Entry) *RoomManager {
+func NewRoomManager(driver Driver, logger *slog.Logger) *RoomManager {
 	return &RoomManager{
 		driver: driver,
-		logger: logger.WithField("component", "room_manager"),
+		logger: logger.With("component", "room_manager"),
 	}
 }
 
 // NewRoomManagerWithMemory creates a new RoomManager with an in-memory driver
-func NewRoomManagerWithMemory(logger *logrus.Entry) *RoomManager {
+func NewRoomManagerWithMemory(logger *slog.Logger) *RoomManager {
 	driver := NewMemoryDriver(logger)
 	return NewRoomManager(driver, logger)
 }

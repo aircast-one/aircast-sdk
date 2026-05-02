@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"reflect"
 
+	"log/slog"
+
 	"github.com/pavliha/aircast-sdk/pkg/message"
-	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 )
@@ -31,18 +32,18 @@ type Router struct {
 	eventRoutes      map[string]EventHandler  // event action name → handler
 	eventMiddlewares []EventMiddleware        // event middleware stack
 	client           message.Client           // message client for sending responses
-	logger           *logrus.Entry
+	logger           *slog.Logger
 }
 
 // NewRouter creates a new Router with the given logger and message client.
-func NewRouter(logger *logrus.Entry, client message.Client) *Router {
+func NewRouter(logger *slog.Logger, client message.Client) *Router {
 	return &Router{
 		routes:           make(map[string]ActionHandler),
 		middlewares:      []Middleware{},
 		eventRoutes:      make(map[string]EventHandler),
 		eventMiddlewares: []EventMiddleware{},
 		client:           client,
-		logger:           logger.WithField("component", "router"),
+		logger:           logger.With("component", "router"),
 	}
 }
 
@@ -94,7 +95,7 @@ func (r *Router) HandleRequest(action string, components ...any) {
 	}
 
 	r.routes[action] = handler
-	r.logger.WithField("action", action).Trace("Registered request handler")
+	r.logger.Debug("Registered request handler", "action", action)
 }
 
 // HandleEvent registers an event handler with middleware applied
@@ -105,7 +106,7 @@ func (r *Router) HandleEvent(action string, handler EventHandler) {
 		wrappedHandler = mw(wrappedHandler)
 	}
 	r.eventRoutes[action] = wrappedHandler
-	r.logger.WithField("action", action).Trace("Registered event handler")
+	r.logger.Debug("Registered event handler", "action", action)
 }
 
 // GetHandler retrieves the ActionHandler for the given action.
@@ -116,30 +117,30 @@ func (r *Router) GetHandler(action string) (ActionHandler, bool) {
 
 // ProcessRequest processes a request message
 func (r *Router) ProcessRequest(ctx context.Context, m message.RequestMessage) error {
-	r.logger.WithFields(map[string]any{
-		"action":     m.Action,
-		"request_id": m.RequestID,
-		"room_id":    m.RoomID,
-		"source":     m.Source,
-	}).Debug("Processing request message")
+	r.logger.Debug("Processing request message",
+		"action", m.Action,
+		"request_id", m.RequestID,
+		"room_id", m.RoomID,
+		"source", m.Source,
+	)
 
 	req, err := CreateFromRequestMessage(m)
 	if err != nil {
-		r.logger.WithError(err).Error("Invalid request message")
+		r.logger.Error("Invalid request message", "error", err)
 		return r.sendError(&m, "INVALID_REQUEST", err.Error())
 	}
 
 	handlerFunc, exists := r.routes[req.Action]
 	if !exists {
-		r.logger.WithField("action", req.Action).Warn("No handler found for request action")
+		r.logger.Warn("No handler found for request action", "action", req.Action)
 		return r.sendError(&m, "UNKNOWN_ACTION", fmt.Sprintf("Unknown action %q", req.Action))
 	}
 
-	r.logger.WithField("action", req.Action).Debug("Found handler, executing...")
+	r.logger.Debug("Found handler, executing...", "action", req.Action)
 
 	payload, err := handlerFunc(ctx, req)
 	if err != nil {
-		r.logger.WithError(err).WithField("action", req.Action).Error("Failed to handle request")
+		r.logger.Error("Failed to handle request", "error", err, "action", req.Action)
 
 		// Check if error is a HandlerError with custom error code
 		var handlerErr *HandlerError
@@ -151,7 +152,7 @@ func (r *Router) ProcessRequest(ctx context.Context, m message.RequestMessage) e
 		return r.sendError(&m, "HANDLER_ERROR", err.Error())
 	}
 
-	r.logger.WithField("action", req.Action).Debug("Request handled successfully")
+	r.logger.Debug("Request handled successfully", "action", req.Action)
 
 	// Inject trace context into response to continue distributed trace
 	traceContext := injectTraceContext(ctx)
@@ -189,19 +190,19 @@ func (r *Router) sendError(reqMsg *message.RequestMessage, code, msg string) err
 
 // ProcessEvent processes an event message
 func (r *Router) ProcessEvent(ctx context.Context, m message.EventMessage) error {
-	r.logger.WithFields(map[string]any{
-		"action":  m.Action,
-		"room_id": m.RoomID,
-		"source":  m.Source,
-	}).Debug("Processing event message")
+	r.logger.Debug("Processing event message",
+		"action", m.Action,
+		"room_id", m.RoomID,
+		"source", m.Source,
+	)
 
 	handlerFunc, exists := r.eventRoutes[m.Action]
 	if !exists {
-		r.logger.WithField("action", m.Action).Debug("No handler registered for event action")
+		r.logger.Debug("No handler registered for event action", "action", m.Action)
 		return nil
 	}
 
-	r.logger.WithField("action", m.Action).Debug("Found event handler, executing...")
+	r.logger.Debug("Found event handler, executing...", "action", m.Action)
 
 	// Create an EventRequest for consistent payload processing
 	eventReq := &EventRequest{
@@ -214,11 +215,11 @@ func (r *Router) ProcessEvent(ctx context.Context, m message.EventMessage) error
 	}
 
 	if err := handlerFunc(ctx, eventReq); err != nil {
-		r.logger.WithError(err).WithField("action", m.Action).Error("Failed to handle event")
+		r.logger.Error("Failed to handle event", "error", err, "action", m.Action)
 		return err
 	}
 
-	r.logger.WithField("action", m.Action).Debug("Event handled successfully")
+	r.logger.Debug("Event handled successfully", "action", m.Action)
 	return nil
 }
 

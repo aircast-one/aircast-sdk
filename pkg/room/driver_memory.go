@@ -4,15 +4,16 @@ import (
 	"fmt"
 	"sync"
 
+	"log/slog"
+
 	"github.com/pavliha/aircast-sdk/pkg/message"
-	"github.com/sirupsen/logrus"
 )
 
 // MemoryDriver is an in-memory implementation of the Driver interface
 type MemoryDriver struct {
 	rooms      map[message.RoomID]*roomSubscribers
 	roomsMutex sync.RWMutex
-	logger     *logrus.Entry
+	logger     *slog.Logger
 }
 
 type roomSubscribers struct {
@@ -21,10 +22,10 @@ type roomSubscribers struct {
 }
 
 // NewMemoryDriver creates a new in-memory driver
-func NewMemoryDriver(logger *logrus.Entry) *MemoryDriver {
+func NewMemoryDriver(logger *slog.Logger) *MemoryDriver {
 	return &MemoryDriver{
 		rooms:  make(map[message.RoomID]*roomSubscribers),
-		logger: logger.WithField("driver", "memory"),
+		logger: logger.With("driver", "memory"),
 	}
 }
 
@@ -54,12 +55,12 @@ func (d *MemoryDriver) Subscribe(roomID message.RoomID, subscriberID string, buf
 	ch := make(chan message.GenericMessage, bufferSize)
 	room.subscribers[subscriberID] = ch
 
-	d.logger.WithFields(logrus.Fields{
-		"room":        roomID,
-		"subscriber":  subscriberID,
-		"buffer_size": bufferSize,
-		"total_subs":  len(room.subscribers),
-	}).Debug("Subscriber added to room")
+	d.logger.Debug("Subscriber added to room",
+		"room", roomID,
+		"subscriber", subscriberID,
+		"buffer_size", bufferSize,
+		"total_subs", len(room.subscribers),
+	)
 
 	return ch, nil
 }
@@ -82,11 +83,11 @@ func (d *MemoryDriver) Unsubscribe(roomID message.RoomID, subscriberID string) {
 		close(ch)
 		delete(room.subscribers, subscriberID)
 
-		d.logger.WithFields(logrus.Fields{
-			"room":       roomID,
-			"subscriber": subscriberID,
-			"total_subs": len(room.subscribers),
-		}).Debug("Subscriber removed from room")
+		d.logger.Debug("Subscriber removed from room",
+			"room", roomID,
+			"subscriber", subscriberID,
+			"total_subs", len(room.subscribers),
+		)
 	}
 }
 
@@ -108,10 +109,10 @@ func (d *MemoryDriver) Publish(roomID message.RoomID, msg message.GenericMessage
 		case ch <- msg:
 			// Message sent successfully
 		default:
-			d.logger.WithFields(logrus.Fields{
-				"room":       roomID,
-				"subscriber": subID,
-			}).Warn("Subscriber channel full, dropping message")
+			d.logger.Warn("Subscriber channel full, dropping message",
+				"room", roomID,
+				"subscriber", subID,
+			)
 		}
 	}
 }
@@ -140,10 +141,10 @@ func (d *MemoryDriver) CloseAll() {
 		room.subMutex.Lock()
 		for subID, ch := range room.subscribers {
 			close(ch)
-			d.logger.WithFields(logrus.Fields{
-				"room":       roomID,
-				"subscriber": subID,
-			}).Debug("Closed subscriber channel")
+			d.logger.Debug("Closed subscriber channel",
+				"room", roomID,
+				"subscriber", subID,
+			)
 		}
 		room.subscribers = make(map[string]chan message.GenericMessage)
 		room.subMutex.Unlock()

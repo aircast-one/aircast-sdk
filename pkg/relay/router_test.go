@@ -6,9 +6,10 @@ import (
 	"testing"
 
 	"github.com/pavliha/aircast-sdk/pkg/message"
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"io"
+	"log/slog"
 )
 
 // MockClient for testing
@@ -68,8 +69,7 @@ func (m *MockClient) IsConnectionError(_ error) bool {
 // Test helper functions
 
 func createTestRouter() (*Router, *MockClient) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.PanicLevel) // Suppress logs in tests
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	client := &MockClient{}
 	router := NewRouter(logger, client)
@@ -80,7 +80,7 @@ func createTestRouter() (*Router, *MockClient) {
 // Tests
 
 func TestNewRouter(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	client := &MockClient{}
 
 	router := NewRouter(logger, client)

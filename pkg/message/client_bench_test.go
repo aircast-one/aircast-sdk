@@ -6,7 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"io"
+	"log/slog"
 )
 
 // BenchmarkConnection for performance testing
@@ -54,8 +55,7 @@ func (c *BenchmarkConnection) IsConnectionError(_ error) bool {
 
 // Benchmark sending different message types
 func BenchmarkClientSend(b *testing.B) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel) // Reduce logging overhead
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	conn := NewBenchmarkConnection()
 	config := ClientConfig{
@@ -124,8 +124,7 @@ func BenchmarkClientSend(b *testing.B) {
 
 // Benchmark sending with channel IDs
 func BenchmarkClientSendWithChannel(b *testing.B) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	conn := NewBenchmarkConnection()
 	config := ClientConfig{
@@ -148,8 +147,7 @@ func BenchmarkClientSendWithChannel(b *testing.B) {
 
 // Benchmark concurrent sending
 func BenchmarkClientSendParallel(b *testing.B) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	conn := NewBenchmarkConnection()
 	config := ClientConfig{
@@ -172,8 +170,7 @@ func BenchmarkClientSendParallel(b *testing.B) {
 
 // Benchmark message processing in Listen
 func BenchmarkClientListen(b *testing.B) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	conn := NewBenchmarkConnection()
 	config := ClientConfig{
@@ -214,8 +211,7 @@ func BenchmarkClientListen(b *testing.B) {
 
 // Benchmark throughput with multiple goroutines
 func BenchmarkClientThroughput(b *testing.B) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	conn := NewBenchmarkConnection()
 	config := ClientConfig{
@@ -251,8 +247,7 @@ func BenchmarkClientThroughput(b *testing.B) {
 
 // Benchmark memory allocations for Send
 func BenchmarkClientSendAllocs(b *testing.B) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	conn := NewBenchmarkConnection()
 	config := ClientConfig{
@@ -276,8 +271,7 @@ func BenchmarkClientSendAllocs(b *testing.B) {
 
 // Benchmark sending response messages
 func BenchmarkClientSendResponse(b *testing.B) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	conn := NewBenchmarkConnection()
 	config := ClientConfig{
@@ -302,8 +296,7 @@ func BenchmarkClientSendResponse(b *testing.B) {
 
 // Benchmark sending error messages
 func BenchmarkClientSendError(b *testing.B) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	conn := NewBenchmarkConnection()
 	config := ClientConfig{
@@ -331,8 +324,7 @@ func BenchmarkClientSendError(b *testing.B) {
 
 // Benchmark SendEvent helper method
 func BenchmarkClientSendEvent(b *testing.B) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	conn := NewBenchmarkConnection()
 	config := ClientConfig{

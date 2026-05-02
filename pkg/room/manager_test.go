@@ -2,18 +2,18 @@ package room
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/pavliha/aircast-sdk/pkg/message"
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestRoomManager_Subscribe_SingleSubscriber(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.PanicLevel) // Suppress logs in tests
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// Create room manager
 	rm := NewRoomManagerWithMemory(logger)
@@ -33,8 +33,7 @@ func TestRoomManager_Subscribe_SingleSubscriber(t *testing.T) {
 }
 
 func TestRoomManager_Subscribe_MultipleSubscribers(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.PanicLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	rm := NewRoomManagerWithMemory(logger)
 	roomID := message.RoomID("test-room-2")
@@ -94,8 +93,7 @@ func TestRoomManager_Subscribe_MultipleSubscribers(t *testing.T) {
 }
 
 func TestRoomManager_Subscribe_DuplicateSubscriber(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.PanicLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	rm := NewRoomManagerWithMemory(logger)
 	roomID := message.RoomID("test-room-3")
@@ -111,8 +109,7 @@ func TestRoomManager_Subscribe_DuplicateSubscriber(t *testing.T) {
 }
 
 func TestRoomManager_CloseAll(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.PanicLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	rm := NewRoomManagerWithMemory(logger)
 	roomID := message.RoomID("test-room-4")
@@ -133,8 +130,7 @@ func TestRoomManager_CloseAll(t *testing.T) {
 }
 
 func TestRoomManager_DifferentRooms(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.PanicLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	rm := NewRoomManagerWithMemory(logger)
 
@@ -173,8 +169,7 @@ func TestRoomManager_DifferentRooms(t *testing.T) {
 }
 
 func TestRoomManager_ListenAndRoute(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.PanicLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// Create a mock client that implements message.Client interface
 	mockClient := &mockClientForRouting{

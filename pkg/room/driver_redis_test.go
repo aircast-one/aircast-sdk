@@ -1,13 +1,14 @@
 package room
 
 import (
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/pavliha/aircast-sdk/pkg/message"
 	"github.com/redis/go-redis/v9"
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,8 +23,7 @@ func setupRedisDriver(t *testing.T) (*RedisDriver, *miniredis.Miniredis) {
 	})
 
 	// Create driver
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.PanicLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	driver := NewRedisDriver(client, logger)
 
@@ -252,8 +252,7 @@ func TestRedisDriver_CrossInstanceCommunication(t *testing.T) {
 	client1 := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	client2 := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.PanicLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	driver1 := NewRedisDriver(client1, logger)
 	driver2 := NewRedisDriver(client2, logger)

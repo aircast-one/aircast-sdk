@@ -6,7 +6,6 @@ require (
 	github.com/alicebob/miniredis/v2 v2.35.0
 	github.com/google/uuid v1.6.0
 	github.com/redis/go-redis/v9 v9.14.1
-	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/otel v1.38.0
 	go.opentelemetry.io/otel/sdk v1.38.0

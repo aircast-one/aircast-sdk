@@ -5,14 +5,14 @@ import (
 	"time"
 
 	"github.com/pavliha/aircast-sdk/pkg/message"
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"io"
+	"log/slog"
 )
 
 func TestMemoryDriver_Subscribe(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.PanicLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	driver := NewMemoryDriver(logger)
 	roomID := message.RoomID("test-room")
@@ -25,8 +25,7 @@ func TestMemoryDriver_Subscribe(t *testing.T) {
 }
 
 func TestMemoryDriver_Subscribe_Duplicate(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.PanicLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	driver := NewMemoryDriver(logger)
 	roomID := message.RoomID("test-room")
@@ -41,8 +40,7 @@ func TestMemoryDriver_Subscribe_Duplicate(t *testing.T) {
 }
 
 func TestMemoryDriver_Unsubscribe(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.PanicLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	driver := NewMemoryDriver(logger)
 	roomID := message.RoomID("test-room")
@@ -60,8 +58,7 @@ func TestMemoryDriver_Unsubscribe(t *testing.T) {
 }
 
 func TestMemoryDriver_Unsubscribe_NonExistent(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.PanicLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	driver := NewMemoryDriver(logger)
 
@@ -70,8 +67,7 @@ func TestMemoryDriver_Unsubscribe_NonExistent(t *testing.T) {
 }
 
 func TestMemoryDriver_Publish(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.PanicLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	driver := NewMemoryDriver(logger)
 	roomID := message.RoomID("test-room")
@@ -109,8 +105,7 @@ func TestMemoryDriver_Publish(t *testing.T) {
 }
 
 func TestMemoryDriver_Publish_NonExistentRoom(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.PanicLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	driver := NewMemoryDriver(logger)
 
@@ -125,8 +120,7 @@ func TestMemoryDriver_Publish_NonExistentRoom(t *testing.T) {
 }
 
 func TestMemoryDriver_Publish_FullChannel(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.WarnLevel) // Enable warnings to test the log
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	driver := NewMemoryDriver(logger)
 	roomID := message.RoomID("test-room")
@@ -151,8 +145,7 @@ func TestMemoryDriver_Publish_FullChannel(t *testing.T) {
 }
 
 func TestMemoryDriver_SubscriberCount(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.PanicLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	driver := NewMemoryDriver(logger)
 	roomID := message.RoomID("test-room")
@@ -175,8 +168,7 @@ func TestMemoryDriver_SubscriberCount(t *testing.T) {
 }
 
 func TestMemoryDriver_CloseAll(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.PanicLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	driver := NewMemoryDriver(logger)
 	room1 := message.RoomID("room-1")
@@ -203,8 +195,7 @@ func TestMemoryDriver_CloseAll(t *testing.T) {
 }
 
 func TestMemoryDriver_MultipleRooms(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.PanicLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	driver := NewMemoryDriver(logger)
 	room1 := message.RoomID("room-1")

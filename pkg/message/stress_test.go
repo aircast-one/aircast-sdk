@@ -10,8 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"io"
+	"log/slog"
 )
 
 // StressTestConnection simulates network conditions
@@ -81,8 +82,7 @@ func TestHighVolumeMessageProcessing(t *testing.T) {
 		t.Skip("Skipping high volume test in short mode")
 	}
 
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	conn := NewStressTestConnection(0.0, 0)
 	config := ClientConfig{
@@ -182,8 +182,7 @@ func TestConcurrentClientsStress(t *testing.T) {
 
 	// Create clients
 	for i := range numClients {
-		logger := logrus.NewEntry(logrus.New())
-		logger.Logger.SetLevel(logrus.ErrorLevel)
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 		conn := NewStressTestConnection(0.01, time.Microsecond) // 1% drop rate
 		connections[i] = conn
@@ -282,8 +281,7 @@ func TestMemoryPressure(t *testing.T) {
 		t.Skip("Skipping memory pressure test in short mode")
 	}
 
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	conn := NewStressTestConnection(0.0, 0)
 	config := ClientConfig{
@@ -367,8 +365,7 @@ func TestNetworkSimulation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			logger := logrus.NewEntry(logrus.New())
-			logger.Logger.SetLevel(logrus.ErrorLevel)
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 			conn := NewStressTestConnection(tt.dropRate, tt.latency)
 			config := ClientConfig{
@@ -444,8 +441,7 @@ func TestGoroutineStorm(t *testing.T) {
 	const numGoroutines = 1000
 	var wg sync.WaitGroup
 
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	conn := NewStressTestConnection(0.0, 0)
 	config := ClientConfig{
@@ -505,8 +501,7 @@ func TestResourceExhaustion(t *testing.T) {
 	}
 
 	// Test with very small buffer
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	conn := NewStressTestConnection(0.0, 0)
 	config := ClientConfig{

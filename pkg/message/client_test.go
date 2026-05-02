@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"log/slog"
 )
 
 // MockConnection is a mock implementation of the Connection interface
@@ -71,7 +72,7 @@ func (m *MockConnection) SetClosed(closed bool) {
 }
 
 func TestNewClient(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	conn := NewMockConnection()
 	config := ClientConfig{
 		Source: SystemDevice,
@@ -85,7 +86,7 @@ func TestNewClient(t *testing.T) {
 
 func TestClient_Listen(t *testing.T) {
 	t.Run("processes valid messages", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 		conn.On("ReadMessage").Return()
 		conn.On("Close").Return(nil)
@@ -130,7 +131,7 @@ func TestClient_Listen(t *testing.T) {
 	})
 
 	t.Run("handles invalid messages", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 		conn.On("ReadMessage").Return()
 		conn.On("Close").Return(nil)
@@ -165,7 +166,7 @@ func TestClient_Listen(t *testing.T) {
 	})
 
 	t.Run("handles context cancellation", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 		conn.On("ReadMessage").Return()
 		conn.On("Close").Return(nil)
@@ -197,7 +198,7 @@ func TestClient_Listen(t *testing.T) {
 
 func TestClient_Send(t *testing.T) {
 	t.Run("sends request message", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 
 		config := ClientConfig{
@@ -224,7 +225,7 @@ func TestClient_Send(t *testing.T) {
 	})
 
 	t.Run("sends response message", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 
 		config := ClientConfig{
@@ -251,7 +252,7 @@ func TestClient_Send(t *testing.T) {
 	})
 
 	t.Run("sends error message", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 
 		config := ClientConfig{
@@ -281,7 +282,7 @@ func TestClient_Send(t *testing.T) {
 	})
 
 	t.Run("sends event message", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 
 		config := ClientConfig{
@@ -307,7 +308,7 @@ func TestClient_Send(t *testing.T) {
 	})
 
 	t.Run("adds channel ID when provided", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 
 		config := ClientConfig{
@@ -334,7 +335,7 @@ func TestClient_Send(t *testing.T) {
 	})
 
 	t.Run("returns error when client is closed", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 		conn.On("Close").Return(nil)
 		conn.On("IsClosed").Return(true)
@@ -357,7 +358,7 @@ func TestClient_Send(t *testing.T) {
 	})
 
 	t.Run("returns error for unsupported message type", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 
 		config := ClientConfig{
@@ -379,7 +380,7 @@ func TestClient_Send(t *testing.T) {
 
 func TestClient_Close(t *testing.T) {
 	t.Run("closes connection and channels", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 		conn.On("Close").Return(nil)
 
@@ -395,7 +396,7 @@ func TestClient_Close(t *testing.T) {
 	})
 
 	t.Run("handles multiple close calls", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 		conn.On("Close").Return(nil).Once()
 
@@ -416,7 +417,7 @@ func TestClient_Close(t *testing.T) {
 	})
 
 	t.Run("handles close error", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 		expectedErr := errors.New("close error")
 		conn.On("Close").Return(expectedErr)
@@ -434,7 +435,7 @@ func TestClient_Close(t *testing.T) {
 
 func TestClient_IsClosed(t *testing.T) {
 	t.Run("returns false when client and connection are open", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 
 		config := ClientConfig{
@@ -447,7 +448,7 @@ func TestClient_IsClosed(t *testing.T) {
 	})
 
 	t.Run("returns true when connection is closed but client is not", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 		conn.SetClosed(true) // Simulate connection becoming unavailable
 
@@ -461,7 +462,7 @@ func TestClient_IsClosed(t *testing.T) {
 	})
 
 	t.Run("returns true after client is explicitly closed", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 		conn.On("Close").Return(nil)
 
@@ -482,7 +483,7 @@ func TestClient_IsClosed(t *testing.T) {
 }
 
 func TestClient_ReadMessage(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	conn := NewMockConnection()
 
 	config := ClientConfig{
@@ -505,7 +506,7 @@ func TestClient_ReadMessage(t *testing.T) {
 
 func TestClient_RegisterWill(t *testing.T) {
 	t.Run("registers will message successfully", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 
 		config := ClientConfig{
@@ -531,7 +532,7 @@ func TestClient_RegisterWill(t *testing.T) {
 	})
 
 	t.Run("returns error when client is closed", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 		conn.On("Close").Return(nil)
 
@@ -553,7 +554,7 @@ func TestClient_RegisterWill(t *testing.T) {
 }
 
 func TestClient_ClearWill(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	conn := NewMockConnection()
 
 	config := ClientConfig{
@@ -574,7 +575,7 @@ func TestClient_ClearWill(t *testing.T) {
 }
 
 func TestClient_SourceToDestination(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	conn := NewMockConnection()
 
 	config := ClientConfig{
@@ -719,7 +720,7 @@ func (c *ConcurrentMockConnection) GetMessages() [][]byte {
 // don't corrupt each other's data due to buffer pool reuse.
 // Run with: go test -race -run TestClient_Send_ConcurrentBufferPoolRace
 func TestClient_Send_ConcurrentBufferPoolRace(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	conn := NewConcurrentMockConnection()
 
 	config := ClientConfig{
@@ -785,7 +786,7 @@ func TestClient_Send_ConcurrentBufferPoolRace(t *testing.T) {
 
 // TestClient_RegisterWill_ConcurrentBufferPoolRace tests concurrent RegisterWill calls
 func TestClient_RegisterWill_ConcurrentBufferPoolRace(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	conn := NewConcurrentMockConnection()
 
 	config := ClientConfig{
@@ -838,7 +839,7 @@ func TestClient_RegisterWill_ConcurrentBufferPoolRace(t *testing.T) {
 // TestClient_Send_MixedConcurrentBufferPoolRace tests mixed Send and RegisterWill
 // to ensure the buffer pool handles different message types correctly
 func TestClient_Send_MixedConcurrentBufferPoolRace(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	conn := NewConcurrentMockConnection()
 
 	config := ClientConfig{

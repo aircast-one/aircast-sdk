@@ -5,9 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
-
-	log "github.com/sirupsen/logrus"
 )
 
 // Pool for reusing bytes.Buffer for JSON encoding
@@ -72,7 +71,7 @@ type ClientConfig struct {
 type client struct {
 	conn       Connection
 	msgCh      chan GenericMessage
-	logger     *log.Entry
+	logger     *slog.Logger
 	closed     bool
 	closeMutex sync.Mutex
 	closeOnce  sync.Once
@@ -80,11 +79,11 @@ type client struct {
 }
 
 // NewClient creates a new message client
-func NewClient(logger *log.Entry, conn Connection, config ClientConfig) Client {
+func NewClient(logger *slog.Logger, conn Connection, config ClientConfig) Client {
 	return &client{
 		conn:       conn,
 		msgCh:      make(chan GenericMessage, 10000), // Much larger buffer for high throughput
-		logger:     logger.WithField("component", "message_client"),
+		logger:     logger.With("component", "message_client"),
 		closed:     false,
 		closeMutex: sync.Mutex{},
 		closeOnce:  sync.Once{},
@@ -102,7 +101,7 @@ func (c *client) Listen(ctx context.Context) error {
 	go func() {
 		select {
 		case <-ctx.Done():
-			c.logger.Trace("Context canceled, stopping client")
+			c.logger.Debug("Context canceled, stopping client")
 			_ = c.Close()
 		case <-done:
 			// Listen function is done.
@@ -118,9 +117,7 @@ func (c *client) Listen(ctx context.Context) error {
 
 		case msgBytes, ok := <-msgChan:
 			if !ok {
-				if c.logger.Logger.IsLevelEnabled(log.TraceLevel) {
-					c.logger.Trace("WebSocket message channel closed")
-				}
+				c.logger.Debug("WebSocket message channel closed")
 				_ = c.Close()
 				return nil
 			}
@@ -128,25 +125,20 @@ func (c *client) Listen(ctx context.Context) error {
 			// Parse the raw message.
 			msg, err := UnmarshalMessage(msgBytes)
 			if err != nil {
-				c.logger.WithError(err).Error("Failed to parse message")
+				c.logger.Error("Failed to parse message", "error", err)
 				// Continue listening, even if a parse error occurs.
 				continue
 			}
 
 			// Forward the message using safe send (prevents race on channel close)
 			if c.safeSend(msg) {
-				// Only log trace if enabled to reduce overhead
-				if c.logger.Logger.IsLevelEnabled(log.TraceLevel) {
-					c.logger.Trace("Message received and forwarded")
-				}
+				c.logger.Debug("Message received and forwarded")
 			} else if !c.IsClosed() {
 				c.logger.Warn("GenericMessage channel full, dropping message")
 			}
 
 		case <-ctx.Done():
-			if c.logger.Logger.IsLevelEnabled(log.TraceLevel) {
-				c.logger.Trace("Context canceled in message loop")
-			}
+			c.logger.Debug("Context canceled in message loop")
 			_ = c.Close()
 			return nil
 		}
@@ -261,7 +253,7 @@ func (c *client) Send(msg any) error {
 	if err := encoder.Encode(envelope); err != nil {
 		buf.Reset()
 		bufferPool.Put(buf)
-		c.logger.WithError(err).Error("Failed to marshal message")
+		c.logger.Error("Failed to marshal message", "error", err)
 		return fmt.Errorf("failed to marshal message: %w", err)
 	}
 
@@ -328,7 +320,7 @@ func (c *client) RegisterWill(will WillMessage) error {
 	if err := encoder.Encode(envelope); err != nil {
 		buf.Reset()
 		bufferPool.Put(buf)
-		c.logger.WithError(err).Error("Failed to marshal will message")
+		c.logger.Error("Failed to marshal will message", "error", err)
 		return fmt.Errorf("failed to marshal will message: %w", err)
 	}
 
