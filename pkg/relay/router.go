@@ -140,15 +140,15 @@ func (r *Router) ProcessRequest(ctx context.Context, m message.RequestMessage) e
 
 	payload, err := handlerFunc(ctx, req)
 	if err != nil {
-		r.logger.Error("Failed to handle request", "error", err, "action", req.Action)
-
-		// Check if error is a HandlerError with custom error code
+		// HandlerError = expected business error (e.g. NOT_FOUND) → WARN
+		// Other errors = unexpected bug → ERROR
 		var handlerErr *HandlerError
 		if errors.As(err, &handlerErr) {
+			r.logger.Warn("Failed to handle request", "error", err, "action", req.Action, "code", handlerErr.Code)
 			return r.sendError(&m, handlerErr.Code, handlerErr.Message)
 		}
 
-		// Default error code for non-HandlerError errors
+		r.logger.Error("Failed to handle request", "error", err, "action", req.Action)
 		return r.sendError(&m, "HANDLER_ERROR", err.Error())
 	}
 
@@ -215,7 +215,12 @@ func (r *Router) ProcessEvent(ctx context.Context, m message.EventMessage) error
 	}
 
 	if err := handlerFunc(ctx, eventReq); err != nil {
-		r.logger.Error("Failed to handle event", "error", err, "action", m.Action)
+		var handlerErr *HandlerError
+		if errors.As(err, &handlerErr) {
+			r.logger.Warn("Failed to handle event", "error", err, "action", m.Action, "code", handlerErr.Code)
+		} else {
+			r.logger.Error("Failed to handle event", "error", err, "action", m.Action)
+		}
 		return err
 	}
 
