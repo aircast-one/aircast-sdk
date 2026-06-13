@@ -51,7 +51,7 @@ func TestRequestMessage(t *testing.T) {
 			Payload:   map[string]string{"key": "value"},
 			Source:    SystemDevice,
 			RequestID: "req-123",
-			ChannelID: "channel-456",
+			RoomID:    "channel-456",
 		}
 
 		// Marshal to JSON
@@ -66,7 +66,7 @@ func TestRequestMessage(t *testing.T) {
 		assert.Equal(t, original.Action, decoded.Action)
 		assert.Equal(t, original.Source, decoded.Source)
 		assert.Equal(t, original.RequestID, decoded.RequestID)
-		assert.Equal(t, original.ChannelID, decoded.ChannelID)
+		assert.Equal(t, original.RoomID, decoded.RoomID)
 	})
 
 	t.Run("omits empty payload", func(t *testing.T) {
@@ -87,7 +87,7 @@ func TestRequestMessage(t *testing.T) {
 		assert.False(t, hasPayload)
 	})
 
-	t.Run("omits empty channel_id", func(t *testing.T) {
+	t.Run("omits empty room_id", func(t *testing.T) {
 		msg := RequestMessage{
 			Action:    "test_action",
 			Source:    SystemDevice,
@@ -101,19 +101,19 @@ func TestRequestMessage(t *testing.T) {
 		err = json.Unmarshal(data, &result)
 		assert.NoError(t, err)
 
-		_, hasChannelID := result["channel_id"]
-		assert.False(t, hasChannelID)
+		_, hasRoomID := result["room_id"]
+		assert.False(t, hasRoomID)
 	})
 }
 
 func TestResponseMessage(t *testing.T) {
 	t.Run("marshal and unmarshal", func(t *testing.T) {
 		original := ResponseMessage{
-			Action:    "test_action",
-			Payload:   map[string]string{"status": "success"},
-			Source:    SystemAPI,
-			ChannelID: "channel-789",
-			ReplyTo:   "req-123",
+			Action:  "test_action",
+			Payload: map[string]string{"status": "success"},
+			Source:  SystemAPI,
+			RoomID:  "channel-789",
+			ReplyTo: "req-123",
 		}
 
 		// Marshal to JSON
@@ -127,7 +127,7 @@ func TestResponseMessage(t *testing.T) {
 
 		assert.Equal(t, original.Action, decoded.Action)
 		assert.Equal(t, original.Source, decoded.Source)
-		assert.Equal(t, original.ChannelID, decoded.ChannelID)
+		assert.Equal(t, original.RoomID, decoded.RoomID)
 		assert.Equal(t, original.ReplyTo, decoded.ReplyTo)
 	})
 
@@ -149,7 +149,7 @@ func TestResponseMessage(t *testing.T) {
 		assert.False(t, hasPayload)
 	})
 
-	t.Run("omits empty channel_id", func(t *testing.T) {
+	t.Run("omits empty room_id", func(t *testing.T) {
 		msg := ResponseMessage{
 			Action:  "test_action",
 			Source:  SystemAPI,
@@ -163,8 +163,8 @@ func TestResponseMessage(t *testing.T) {
 		err = json.Unmarshal(data, &result)
 		assert.NoError(t, err)
 
-		_, hasChannelID := result["channel_id"]
-		assert.False(t, hasChannelID)
+		_, hasRoomID := result["room_id"]
+		assert.False(t, hasRoomID)
 	})
 }
 
@@ -210,9 +210,9 @@ func TestErrorResponse(t *testing.T) {
 func TestErrorMessage(t *testing.T) {
 	t.Run("marshal and unmarshal", func(t *testing.T) {
 		original := ErrorMessage{
-			Action:    "failed_action",
-			Source:    SystemDevice,
-			ChannelID: "channel-123",
+			Action: "failed_action",
+			Source: SystemDevice,
+			RoomID: "channel-123",
 			Error: ErrorResponse{
 				Code:    "ERR_FAILED",
 				Message: "Operation failed",
@@ -232,13 +232,13 @@ func TestErrorMessage(t *testing.T) {
 
 		assert.Equal(t, original.Action, decoded.Action)
 		assert.Equal(t, original.Source, decoded.Source)
-		assert.Equal(t, original.ChannelID, decoded.ChannelID)
+		assert.Equal(t, original.RoomID, decoded.RoomID)
 		assert.Equal(t, original.ReplyTo, decoded.ReplyTo)
 		assert.Equal(t, original.Error.Code, decoded.Error.Code)
 		assert.Equal(t, original.Error.Message, decoded.Error.Message)
 	})
 
-	t.Run("omits empty channel_id", func(t *testing.T) {
+	t.Run("omits empty room_id", func(t *testing.T) {
 		msg := ErrorMessage{
 			Action: "failed_action",
 			Source: SystemDevice,
@@ -256,18 +256,18 @@ func TestErrorMessage(t *testing.T) {
 		err = json.Unmarshal(data, &result)
 		assert.NoError(t, err)
 
-		_, hasChannelID := result["channel_id"]
-		assert.False(t, hasChannelID)
+		_, hasRoomID := result["room_id"]
+		assert.False(t, hasRoomID)
 	})
 }
 
 func TestEventMessage(t *testing.T) {
 	t.Run("marshal and unmarshal", func(t *testing.T) {
 		original := EventMessage{
-			Action:    "device_connected",
-			Payload:   map[string]string{"device_id": "device-123"},
-			Source:    SystemDevice,
-			ChannelID: "channel-999",
+			Action:  "device_connected",
+			Payload: map[string]string{"device_id": "device-123"},
+			Source:  SystemDevice,
+			RoomID:  "channel-999",
 		}
 
 		// Marshal to JSON
@@ -281,7 +281,7 @@ func TestEventMessage(t *testing.T) {
 
 		assert.Equal(t, original.Action, decoded.Action)
 		assert.Equal(t, original.Source, decoded.Source)
-		assert.Equal(t, original.ChannelID, decoded.ChannelID)
+		assert.Equal(t, original.RoomID, decoded.RoomID)
 	})
 
 	t.Run("omits empty payload", func(t *testing.T) {
@@ -301,7 +301,7 @@ func TestEventMessage(t *testing.T) {
 		assert.False(t, hasPayload)
 	})
 
-	t.Run("omits empty channel_id", func(t *testing.T) {
+	t.Run("omits empty room_id", func(t *testing.T) {
 		msg := EventMessage{
 			Action: "test_event",
 			Source: SystemAPI,
@@ -314,8 +314,8 @@ func TestEventMessage(t *testing.T) {
 		err = json.Unmarshal(data, &result)
 		assert.NoError(t, err)
 
-		_, hasChannelID := result["channel_id"]
-		assert.False(t, hasChannelID)
+		_, hasRoomID := result["room_id"]
+		assert.False(t, hasRoomID)
 	})
 }
 
@@ -333,8 +333,8 @@ func TestTypeAliases(t *testing.T) {
 	var requestID RequestID = "request-id"
 	assert.Equal(t, "request-id", requestID)
 
-	var channelID ChannelID = "channel-id"
-	assert.Equal(t, "channel-id", channelID)
+	var RoomID RoomID = "channel-id"
+	assert.Equal(t, "channel-id", RoomID)
 
 	// Test that GenericMessage can hold different types
 	var genericMsg GenericMessage
@@ -431,5 +431,83 @@ func TestMessageStructuresWithComplexPayloads(t *testing.T) {
 		// Check that array payload is preserved
 		decodedPayload := decoded.Payload.([]any)
 		assert.Len(t, decodedPayload, 2)
+	})
+}
+
+func TestSetMessageRoomID(t *testing.T) {
+	roomID := RoomID("test-room-123")
+
+	t.Run("EventMessage", func(t *testing.T) {
+		msg := &EventMessage{Action: "test.action"}
+		success := SetMessageRoomID(msg, roomID)
+		assert.True(t, success)
+		assert.Equal(t, roomID, msg.RoomID)
+	})
+
+	t.Run("RequestMessage", func(t *testing.T) {
+		msg := &RequestMessage{Action: "test.action"}
+		success := SetMessageRoomID(msg, roomID)
+		assert.True(t, success)
+		assert.Equal(t, string(roomID), msg.RoomID)
+	})
+
+	t.Run("ResponseMessage", func(t *testing.T) {
+		msg := &ResponseMessage{Action: "test.action"}
+		success := SetMessageRoomID(msg, roomID)
+		assert.True(t, success)
+		assert.Equal(t, roomID, msg.RoomID)
+	})
+
+	t.Run("ErrorMessage", func(t *testing.T) {
+		msg := &ErrorMessage{Action: "test.action"}
+		success := SetMessageRoomID(msg, roomID)
+		assert.True(t, success)
+		assert.Equal(t, roomID, msg.RoomID)
+	})
+
+	t.Run("RawJSONMap", func(t *testing.T) {
+		msg := map[string]any{
+			"action": "test.action",
+			"type":   "request",
+		}
+		success := SetMessageRoomID(msg, roomID)
+		assert.True(t, success)
+		assert.Equal(t, string(roomID), msg["room_id"])
+	})
+
+	t.Run("UnsupportedType", func(t *testing.T) {
+		msg := "not a message"
+		success := SetMessageRoomID(msg, roomID)
+		assert.False(t, success)
+	})
+
+	t.Run("ValueReceiverDoesNotWork", func(t *testing.T) {
+		// This demonstrates that value receivers won't work
+		// because the interface requires a pointer
+		msg := EventMessage{Action: "test.action"}
+		success := SetMessageRoomID(msg, roomID) // Not a pointer
+		assert.False(t, success)                 // Should fail because value doesn't implement MutableRoomMessage
+	})
+}
+
+func TestMutableRoomMessageInterface(t *testing.T) {
+	roomID := RoomID("test-room-456")
+
+	t.Run("PointerImplementsInterface", func(t *testing.T) {
+		msg := &EventMessage{Action: "test.action"}
+
+		// Verify it implements the interface
+		var _ MutableRoomMessage = msg
+
+		msg.SetRoomID(roomID)
+		assert.Equal(t, roomID, msg.GetRoomID())
+	})
+
+	t.Run("AllMessageTypesImplementInterface", func(t *testing.T) {
+		// Verify all message types implement MutableRoomMessage
+		var _ MutableRoomMessage = &EventMessage{}
+		var _ MutableRoomMessage = &RequestMessage{}
+		var _ MutableRoomMessage = &ResponseMessage{}
+		var _ MutableRoomMessage = &ErrorMessage{}
 	})
 }

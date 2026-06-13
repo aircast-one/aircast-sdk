@@ -2,15 +2,19 @@ package relay
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 
+	"log/slog"
+
 	"github.com/pavliha/aircast-sdk/pkg/message"
-	"github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
-// ActionHandler processes an action with the given context, request, and response.
-type ActionHandler func(ctx context.Context, req *Request, res ResponseWriter) error
+// ActionHandler processes an action with the given context and request, returning a response payload or error.
+type ActionHandler func(ctx context.Context, req *Request) (payload any, err error)
 
 // EventHandler processes an event with the given context and event data.
 type EventHandler func(ctx context.Context, event *EventRequest) error
@@ -21,34 +25,25 @@ type Middleware func(ActionHandler) ActionHandler
 // EventMiddleware wraps an EventHandler for pre- and post-processing.
 type EventMiddleware func(EventHandler) EventHandler
 
-// ResponseFactory creates a ResponseWriter for the given request.
-// Services implement this to provide their specific response routing logic.
-type ResponseFactory func(ctx context.Context, req *Request, logger *logrus.Entry) ResponseWriter
-
-// ErrorSender sends error responses when no handler is found or validation fails.
-type ErrorSender func(ctx context.Context, req *Request, code, message string) error
-
 // Router stores registered action handlers and global middleware.
 type Router struct {
 	routes           map[string]ActionHandler // action name → handler
 	middlewares      []Middleware             // global middleware stack
 	eventRoutes      map[string]EventHandler  // event action name → handler
 	eventMiddlewares []EventMiddleware        // event middleware stack
-	responseFactory  ResponseFactory          // creates responses for handlers
-	errorSender      ErrorSender              // sends errors when no handler found
-	logger           *logrus.Entry
+	client           message.Client           // message client for sending responses
+	logger           *slog.Logger
 }
 
-// NewRouter creates a new Router with the given logger, response factory, and error sender.
-func NewRouter(logger *logrus.Entry, responseFactory ResponseFactory, errorSender ErrorSender) *Router {
+// NewRouter creates a new Router with the given logger and message client.
+func NewRouter(logger *slog.Logger, client message.Client) *Router {
 	return &Router{
 		routes:           make(map[string]ActionHandler),
 		middlewares:      []Middleware{},
 		eventRoutes:      make(map[string]EventHandler),
 		eventMiddlewares: []EventMiddleware{},
-		responseFactory:  responseFactory,
-		errorSender:      errorSender,
-		logger:           logger.WithField("component", "router"),
+		client:           client,
+		logger:           logger.With("component", "router"),
 	}
 }
 
@@ -100,7 +95,7 @@ func (r *Router) HandleRequest(action string, components ...any) {
 	}
 
 	r.routes[action] = handler
-	r.logger.WithField("action", action).Trace("Registered request handler")
+	r.logger.Debug("Registered request handler", "action", action)
 }
 
 // HandleEvent registers an event handler with middleware applied
@@ -111,7 +106,7 @@ func (r *Router) HandleEvent(action string, handler EventHandler) {
 		wrappedHandler = mw(wrappedHandler)
 	}
 	r.eventRoutes[action] = wrappedHandler
-	r.logger.WithField("action", action).Trace("Registered event handler")
+	r.logger.Debug("Registered event handler", "action", action)
 }
 
 // GetHandler retrieves the ActionHandler for the given action.
@@ -122,68 +117,114 @@ func (r *Router) GetHandler(action string) (ActionHandler, bool) {
 
 // ProcessRequest processes a request message
 func (r *Router) ProcessRequest(ctx context.Context, m message.RequestMessage) error {
-	r.logger.WithFields(map[string]any{
-		"action":     m.Action,
-		"request_id": m.RequestID,
-		"session_id": m.ChannelID,
-		"source":     m.Source,
-	}).Trace("Processing request message")
+	r.logger.Debug("Processing request message",
+		"action", m.Action,
+		"request_id", m.RequestID,
+		"room_id", m.RoomID,
+		"source", m.Source,
+	)
 
 	req, err := CreateFromRequestMessage(m)
 	if err != nil {
-		r.logger.WithError(err).Error("Invalid request message")
-		return err
+		r.logger.Error("Invalid request message", "error", err)
+		return r.sendError(&m, "INVALID_REQUEST", err.Error())
 	}
 
 	handlerFunc, exists := r.routes[req.Action]
 	if !exists {
-		r.logger.WithField("action", req.Action).Warn("No handler found for request action")
-		return r.errorSender(ctx, req, "INVALID_REQUEST", fmt.Sprintf("Unknown action %q", req.Action))
+		r.logger.Warn("No handler found for request action", "action", req.Action)
+		return r.sendError(&m, "UNKNOWN_ACTION", fmt.Sprintf("Unknown action %q", req.Action))
 	}
 
-	r.logger.WithField("action", req.Action).Trace("Found handler, executing...")
+	r.logger.Debug("Found handler, executing...", "action", req.Action)
 
-	resp := r.responseFactory(ctx, req, r.logger)
-	if err := handlerFunc(ctx, req, resp); err != nil {
-		r.logger.WithError(err).WithField("action", req.Action).Error("Failed to handle request")
-		return err
+	payload, err := handlerFunc(ctx, req)
+	if err != nil {
+		// HandlerError = expected business error (e.g. NOT_FOUND) → WARN
+		// Other errors = unexpected bug → ERROR
+		var handlerErr *HandlerError
+		if errors.As(err, &handlerErr) {
+			r.logger.Warn("Failed to handle request", "error", err, "action", req.Action, "code", handlerErr.Code)
+			return r.sendError(&m, handlerErr.Code, handlerErr.Message)
+		}
+
+		r.logger.Error("Failed to handle request", "error", err, "action", req.Action)
+		return r.sendError(&m, "HANDLER_ERROR", err.Error())
 	}
 
-	r.logger.WithField("action", req.Action).Trace("Request handled successfully")
-	return nil
+	r.logger.Debug("Request handled successfully", "action", req.Action)
+
+	// Inject trace context into response to continue distributed trace
+	traceContext := injectTraceContext(ctx)
+
+	return r.client.Send(message.ResponseMessage{
+		Action:       m.Action,
+		Payload:      payload,
+		Source:       r.client.GetSource(),
+		Destination:  message.SourceToDestination(m.Source),
+		RoomID:       m.RoomID,
+		ReplyTo:      m.RequestID,
+		TraceContext: traceContext,
+	})
+}
+
+// sendError sends an error response for a request
+func (r *Router) sendError(reqMsg *message.RequestMessage, code, msg string) error {
+	// Use background context for error responses since we might not have an active span
+	ctx := context.Background()
+	traceContext := injectTraceContext(ctx)
+
+	return r.client.Send(message.ErrorMessage{
+		Action:      reqMsg.Action,
+		Source:      r.client.GetSource(),
+		Destination: message.SourceToDestination(reqMsg.Source),
+		RoomID:      reqMsg.RoomID,
+		Error: message.ErrorResponse{
+			Code:    code,
+			Message: msg,
+		},
+		ReplyTo:      reqMsg.RequestID,
+		TraceContext: traceContext,
+	})
 }
 
 // ProcessEvent processes an event message
 func (r *Router) ProcessEvent(ctx context.Context, m message.EventMessage) error {
-	r.logger.WithFields(map[string]any{
-		"action":     m.Action,
-		"session_id": m.ChannelID,
-		"source":     m.Source,
-	}).Trace("Processing event message")
+	r.logger.Debug("Processing event message",
+		"action", m.Action,
+		"room_id", m.RoomID,
+		"source", m.Source,
+	)
 
 	handlerFunc, exists := r.eventRoutes[m.Action]
 	if !exists {
-		r.logger.WithField("action", m.Action).Trace("No handler registered for event action")
+		r.logger.Debug("No handler registered for event action", "action", m.Action)
 		return nil
 	}
 
-	r.logger.WithField("action", m.Action).Trace("Found event handler, executing...")
+	r.logger.Debug("Found event handler, executing...", "action", m.Action)
 
 	// Create an EventRequest for consistent payload processing
 	eventReq := &EventRequest{
 		Action:       m.Action,
-		SessionID:    m.ChannelID,
+		RoomID:       m.RoomID,
 		Payload:      m.Payload,
 		Source:       m.Source,
+		FromMemberID: m.FromMemberID, // Preserve originating member ID for session management
 		TraceContext: m.TraceContext, // Preserve W3C Trace Context for distributed tracing
 	}
 
 	if err := handlerFunc(ctx, eventReq); err != nil {
-		r.logger.WithError(err).WithField("action", m.Action).Error("Failed to handle event")
+		var handlerErr *HandlerError
+		if errors.As(err, &handlerErr) {
+			r.logger.Warn("Failed to handle event", "error", err, "action", m.Action, "code", handlerErr.Code)
+		} else {
+			r.logger.Error("Failed to handle event", "error", err, "action", m.Action)
+		}
 		return err
 	}
 
-	r.logger.WithField("action", m.Action).Trace("Event handled successfully")
+	r.logger.Debug("Event handled successfully", "action", m.Action)
 	return nil
 }
 
@@ -215,27 +256,32 @@ func (r *Router) tryReflectionAdapter(candidate any, typ reflect.Type) ActionHan
 		return nil
 	}
 
-	return func(ctx context.Context, req *Request, res ResponseWriter) error {
+	return func(ctx context.Context, req *Request) (any, error) {
 		outs := reflect.ValueOf(candidate).Call([]reflect.Value{
 			reflect.ValueOf(ctx),
 			reflect.ValueOf(req),
-			reflect.ValueOf(res),
 		})
 
-		if errVal := outs[0]; !errVal.IsNil() {
-			return errVal.Interface().(error)
+		var payload any
+		var err error
+
+		if !outs[0].IsNil() {
+			payload = outs[0].Interface()
 		}
-		return nil
+		if !outs[1].IsNil() {
+			err = outs[1].Interface().(error)
+		}
+
+		return payload, err
 	}
 }
 
 // isValidActionHandlerSignature checks if the function signature matches ActionHandler requirements
 func (r *Router) isValidActionHandlerSignature(typ reflect.Type) bool {
-	return typ.NumIn() == 3 && typ.NumOut() == 1 &&
+	return typ.NumIn() == 2 && typ.NumOut() == 2 &&
 		typ.In(0).String() == "context.Context" &&
 		typ.In(1).AssignableTo(reflect.TypeOf(&Request{})) &&
-		typ.In(2).Implements(reflect.TypeOf((*ResponseWriter)(nil)).Elem()) &&
-		typ.Out(0).AssignableTo(reflect.TypeOf((*error)(nil)).Elem())
+		typ.Out(1).AssignableTo(reflect.TypeOf((*error)(nil)).Elem())
 }
 
 // trySimpleFunctionAdapters attempts to adapt simple function signatures
@@ -260,9 +306,8 @@ func (r *Router) trySimpleFunctionAdapters(candidate any) ActionHandler {
 // adaptNoArgFunction adapts func() any
 func (r *Router) adaptNoArgFunction(candidate any) ActionHandler {
 	if fn, ok := candidate.(func() any); ok {
-		return func(ctx context.Context, req *Request, res ResponseWriter) error {
-			result := fn()
-			return res.SendSuccess(result)
+		return func(ctx context.Context, req *Request) (any, error) {
+			return fn(), nil
 		}
 	}
 	return nil
@@ -271,12 +316,8 @@ func (r *Router) adaptNoArgFunction(candidate any) ActionHandler {
 // adaptNoArgWithErrorFunction adapts func() (any, error)
 func (r *Router) adaptNoArgWithErrorFunction(candidate any) ActionHandler {
 	if fn, ok := candidate.(func() (any, error)); ok {
-		return func(ctx context.Context, req *Request, res ResponseWriter) error {
-			result, err := fn()
-			if err != nil {
-				return res.SendError("SERVICE_UNAVAILABLE", err.Error())
-			}
-			return res.SendSuccess(result)
+		return func(ctx context.Context, req *Request) (any, error) {
+			return fn()
 		}
 	}
 	return nil
@@ -285,9 +326,8 @@ func (r *Router) adaptNoArgWithErrorFunction(candidate any) ActionHandler {
 // adaptSingleArgFunction adapts func(any) any
 func (r *Router) adaptSingleArgFunction(candidate any) ActionHandler {
 	if fn, ok := candidate.(func(any) any); ok {
-		return func(ctx context.Context, req *Request, res ResponseWriter) error {
-			result := fn(req.Payload)
-			return res.SendSuccess(result)
+		return func(ctx context.Context, req *Request) (any, error) {
+			return fn(req.Payload), nil
 		}
 	}
 	return nil
@@ -296,13 +336,24 @@ func (r *Router) adaptSingleArgFunction(candidate any) ActionHandler {
 // adaptSingleArgWithErrorFunction adapts func(any) (any, error)
 func (r *Router) adaptSingleArgWithErrorFunction(candidate any) ActionHandler {
 	if fn, ok := candidate.(func(any) (any, error)); ok {
-		return func(ctx context.Context, req *Request, res ResponseWriter) error {
-			result, err := fn(req.Payload)
-			if err != nil {
-				return res.SendError("SERVICE_UNAVAILABLE", err.Error())
-			}
-			return res.SendSuccess(result)
+		return func(ctx context.Context, req *Request) (any, error) {
+			return fn(req.Payload)
 		}
 	}
 	return nil
+}
+
+// injectTraceContext extracts trace context from the Go context and
+// returns it as a map suitable for message TraceContext field
+func injectTraceContext(ctx context.Context) map[string]string {
+	propagator := otel.GetTextMapPropagator()
+	carrier := propagation.MapCarrier{}
+
+	propagator.Inject(ctx, carrier)
+
+	if len(carrier) == 0 {
+		return nil
+	}
+
+	return map[string]string(carrier)
 }

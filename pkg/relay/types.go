@@ -7,12 +7,33 @@ import (
 	"github.com/pavliha/aircast-sdk/pkg/message"
 )
 
+// HandlerError represents an error with a custom error code
+// This allows handlers to return specific error codes that will be sent to clients
+type HandlerError struct {
+	Code    string
+	Message string
+}
+
+// Error implements the error interface
+func (e *HandlerError) Error() string {
+	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+}
+
+// NewError creates a new HandlerError with the given code and message
+func NewError(code, message string) *HandlerError {
+	return &HandlerError{
+		Code:    code,
+		Message: message,
+	}
+}
+
 // Request represents an internal request structure for message handling
 type Request struct {
 	Action       string
-	SessionID    string
+	RoomID       string
 	RequestID    string
 	Source       string // Source of the request (web, api, device)
+	FromMemberID string // Originating member ID (e.g., web session ID)
 	Payload      map[string]any
 	TraceContext map[string]string // W3C Trace Context (traceparent, tracestate)
 }
@@ -20,8 +41,9 @@ type Request struct {
 // EventRequest represents an internal event structure with payload processing
 type EventRequest struct {
 	Action       string
-	SessionID    string
+	RoomID       string
 	Source       string
+	FromMemberID string // Originating member ID (e.g., web session ID)
 	Payload      any
 	TraceContext map[string]string // W3C Trace Context (traceparent, tracestate)
 }
@@ -35,7 +57,7 @@ func CreateFromRequestMessage(reqMsg message.RequestMessage) (*Request, error) {
 	if reqMsg.Source == "" {
 		return nil, fmt.Errorf("request source is required for response routing")
 	}
-	if reqMsg.ChannelID == "" {
+	if reqMsg.RoomID == "" {
 		return nil, fmt.Errorf("request channel ID is required")
 	}
 
@@ -51,9 +73,10 @@ func CreateFromRequestMessage(reqMsg message.RequestMessage) (*Request, error) {
 
 	return &Request{
 		Action:       reqMsg.Action,
-		SessionID:    reqMsg.ChannelID,
+		RoomID:       reqMsg.RoomID,
 		RequestID:    reqMsg.RequestID,
 		Source:       reqMsg.Source,
+		FromMemberID: reqMsg.FromMemberID, // Preserve originating member ID for session management
 		Payload:      payload,
 		TraceContext: reqMsg.TraceContext, // Preserve W3C Trace Context for distributed tracing
 	}, nil

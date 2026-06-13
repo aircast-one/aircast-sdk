@@ -92,7 +92,7 @@ client := message.NewQueuedClient(baseClient, logger, &config)
 
 // Messages are automatically queued during disconnections
 // and replayed when connection is restored
-client.SendEventToChannel("sensor.reading", data, channelID)
+client.SendEventToChannel("sensor.reading", data, RoomID)
 ```
 
 ## Message Types
@@ -107,7 +107,7 @@ client.Send(message.RequestMessage{
     Destination: message.DestinationDevice,
     RequestID:   "req-123",
     Payload:     map[string]any{},
-}, &channelID)
+}, &RoomID)
 ```
 
 ### Response
@@ -126,7 +126,7 @@ Server-initiated events (no response expected):
 client.SendEventToChannel(
     "mavlink.telemetry.update",
     telemetryData,
-    channelID,
+    RoomID,
 )
 ```
 
@@ -158,7 +158,7 @@ Example:
 client.SendEventToChannel(
     "telemetry.update",
     data,
-    channelID,
+    RoomID,
 )
 
 // Send heartbeat to API (not forwarded to web)

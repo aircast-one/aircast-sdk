@@ -10,7 +10,7 @@ import (
 func TestCreateFromRequestMessage_Success(t *testing.T) {
 	reqMsg := message.RequestMessage{
 		Action:    "test.action",
-		ChannelID: "session-123",
+		RoomID:    "session-123",
 		RequestID: "req-123",
 		Source:    "device",
 		Payload: map[string]any{
@@ -27,7 +27,7 @@ func TestCreateFromRequestMessage_Success(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, req)
 	assert.Equal(t, "test.action", req.Action)
-	assert.Equal(t, "session-123", req.SessionID)
+	assert.Equal(t, "session-123", req.RoomID)
 	assert.Equal(t, "req-123", req.RequestID)
 	assert.Equal(t, "device", req.Source)
 	assert.Equal(t, "value1", req.Payload["field1"])
@@ -38,7 +38,7 @@ func TestCreateFromRequestMessage_Success(t *testing.T) {
 func TestCreateFromRequestMessage_NilPayload(t *testing.T) {
 	reqMsg := message.RequestMessage{
 		Action:    "test.action",
-		ChannelID: "session-123",
+		RoomID:    "session-123",
 		RequestID: "req-123",
 		Source:    "web",
 		Payload:   nil,
@@ -54,7 +54,7 @@ func TestCreateFromRequestMessage_NilPayload(t *testing.T) {
 func TestCreateFromRequestMessage_InvalidPayload(t *testing.T) {
 	reqMsg := message.RequestMessage{
 		Action:    "test.action",
-		ChannelID: "session-123",
+		RoomID:    "session-123",
 		RequestID: "req-123",
 		Source:    "web",
 		Payload:   "not a map", // Invalid payload type
@@ -70,7 +70,7 @@ func TestCreateFromRequestMessage_InvalidPayload(t *testing.T) {
 func TestCreateFromRequestMessage_MissingRequestID(t *testing.T) {
 	reqMsg := message.RequestMessage{
 		Action:    "test.action",
-		ChannelID: "session-123",
+		RoomID:    "session-123",
 		RequestID: "", // Missing request ID
 		Source:    "web",
 		Payload:   nil,
@@ -86,7 +86,7 @@ func TestCreateFromRequestMessage_MissingRequestID(t *testing.T) {
 func TestCreateFromRequestMessage_MissingSource(t *testing.T) {
 	reqMsg := message.RequestMessage{
 		Action:    "test.action",
-		ChannelID: "session-123",
+		RoomID:    "session-123",
 		RequestID: "req-123",
 		Source:    "", // Missing source
 		Payload:   nil,
@@ -99,10 +99,10 @@ func TestCreateFromRequestMessage_MissingSource(t *testing.T) {
 	assert.Contains(t, err.Error(), "request source is required")
 }
 
-func TestCreateFromRequestMessage_MissingChannelID(t *testing.T) {
+func TestCreateFromRequestMessage_MissingRoomID(t *testing.T) {
 	reqMsg := message.RequestMessage{
 		Action:    "test.action",
-		ChannelID: "", // Missing channel ID
+		RoomID:    "", // Missing room ID
 		RequestID: "req-123",
 		Source:    "web",
 		Payload:   nil,

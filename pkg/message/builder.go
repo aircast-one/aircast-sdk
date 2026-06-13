@@ -33,7 +33,7 @@ func (b *RequestBuilder) WithSource(source MessageSource) *RequestBuilder {
 
 // WithDestination sets the message destination
 func (b *RequestBuilder) WithDestination(destination MessageDestination) *RequestBuilder {
-	b.msg.Destination = MessageSource(destination)
+	b.msg.Destination = destination
 	return b
 }
 
@@ -43,9 +43,9 @@ func (b *RequestBuilder) WithPayload(payload any) *RequestBuilder {
 	return b
 }
 
-// WithChannelID sets the channel ID
-func (b *RequestBuilder) WithChannelID(channelID string) *RequestBuilder {
-	b.msg.ChannelID = channelID
+// WithRoomID sets the channel ID
+func (b *RequestBuilder) WithRoomID(RoomID string) *RequestBuilder {
+	b.msg.RoomID = RoomID
 	return b
 }
 
@@ -98,9 +98,9 @@ func (b *ResponseBuilder) WithReplyTo(replyTo string) *ResponseBuilder {
 	return b
 }
 
-// WithChannelID sets the channel ID
-func (b *ResponseBuilder) WithChannelID(channelID string) *ResponseBuilder {
-	b.msg.ChannelID = channelID
+// WithRoomID sets the room ID
+func (b *ResponseBuilder) WithRoomID(RoomID string) *ResponseBuilder {
+	b.msg.RoomID = RoomID
 	return b
 }
 
@@ -147,9 +147,9 @@ func (b *EventBuilder) WithPayload(payload any) *EventBuilder {
 	return b
 }
 
-// WithChannelID sets the channel ID
-func (b *EventBuilder) WithChannelID(channelID string) *EventBuilder {
-	b.msg.ChannelID = channelID
+// WithRoomID sets the room ID
+func (b *EventBuilder) WithRoomID(RoomID string) *EventBuilder {
+	b.msg.RoomID = RoomID
 	return b
 }
 
@@ -206,9 +206,9 @@ func (b *ErrorBuilder) WithReplyTo(replyTo string) *ErrorBuilder {
 	return b
 }
 
-// WithChannelID sets the channel ID
-func (b *ErrorBuilder) WithChannelID(channelID string) *ErrorBuilder {
-	b.msg.ChannelID = channelID
+// WithRoomID sets the room ID
+func (b *ErrorBuilder) WithRoomID(RoomID string) *ErrorBuilder {
+	b.msg.RoomID = RoomID
 	return b
 }
 
@@ -269,9 +269,9 @@ func (b *MapBuilder) WithPayload(payload any) *MapBuilder {
 	return b
 }
 
-// WithChannelID adds a channel_id field
-func (b *MapBuilder) WithChannelID(channelID string) *MapBuilder {
-	b.msg["channel_id"] = channelID
+// WithRoomID adds a room_id field
+func (b *MapBuilder) WithRoomID(RoomID string) *MapBuilder {
+	b.msg["room_id"] = RoomID
 	return b
 }
 

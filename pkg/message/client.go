@@ -5,9 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
-
-	log "github.com/sirupsen/logrus"
 )
 
 // Pool for reusing bytes.Buffer for JSON encoding
@@ -22,14 +21,8 @@ type Client interface {
 	// Listen starts listening for incoming messages
 	Listen(ctx context.Context) error
 
-	// SendMessageToChannel sends direct message
-	SendMessageToChannel(id ChannelID, msg any) error
-
-	// SendBroadcastMessage sends a broadcast message
-	SendBroadcastMessage(msg any) error
-
 	// Send sends a message
-	Send(msg any, sessionId *ChannelID) error
+	Send(msg any) error
 
 	// Close closes the client connection
 	Close() error
@@ -40,11 +33,8 @@ type Client interface {
 	// ReadMessage returns a channel of incoming parsed messages
 	ReadMessage() <-chan any
 
-	SendResponse(req *RequestMessage, payload any) error
-
-	SendErrorToChannel(req *RequestMessage, payload ErrorResponse) error
-
-	SendEventToChannel(action MessageAction, payload any, destination MessageDestination, sessionID ChannelID) error
+	// GetSource returns the message source for this client
+	GetSource() MessageSource
 
 	// RegisterWill registers a Last Will message to be sent if connection closes unexpectedly
 	RegisterWill(will WillMessage) error
@@ -55,6 +45,10 @@ type Client interface {
 	// SendRawJSON sends pre-serialized JSON bytes directly to the connection
 	// This is useful for forwarding stored messages without re-serialization
 	SendRawJSON(jsonBytes []byte) error
+
+	// IsConnectionError returns true if the error indicates a transport-level
+	// connection failure that should trigger message queuing rather than dropping.
+	IsConnectionError(err error) bool
 }
 
 // Connection represents a WebSocket connection
@@ -63,36 +57,37 @@ type Connection interface {
 	ReadMessage() <-chan []byte
 	Close() error
 	IsClosed() bool
+	// IsConnectionError returns true if the error indicates a transport-level
+	// connection failure (e.g. broken pipe, connection reset). Each transport
+	// adapter implements this using typed error checks rather than string matching.
+	IsConnectionError(err error) bool
 }
 
 type ClientConfig struct {
-	Source      MessageSource
-	PrintConfig *PrintConfig
+	Source MessageSource
 }
 
 // client implements the Client interface
 type client struct {
-	conn        Connection
-	msgCh       chan GenericMessage
-	logger      *log.Entry
-	closed      bool
-	closeMutex  sync.Mutex
-	closeOnce   sync.Once
-	source      MessageSource
-	printConfig *PrintConfig
+	conn       Connection
+	msgCh      chan GenericMessage
+	logger     *slog.Logger
+	closed     bool
+	closeMutex sync.Mutex
+	closeOnce  sync.Once
+	source     MessageSource
 }
 
 // NewClient creates a new message client
-func NewClient(logger *log.Entry, conn Connection, config ClientConfig) Client {
+func NewClient(logger *slog.Logger, conn Connection, config ClientConfig) Client {
 	return &client{
-		conn:        conn,
-		msgCh:       make(chan GenericMessage, 10000), // Much larger buffer for high throughput
-		logger:      logger.WithField("component", "message_client"),
-		closed:      false,
-		closeMutex:  sync.Mutex{},
-		closeOnce:   sync.Once{},
-		source:      config.Source,
-		printConfig: config.PrintConfig,
+		conn:       conn,
+		msgCh:      make(chan GenericMessage, 10000), // Much larger buffer for high throughput
+		logger:     logger.With("component", "message_client"),
+		closed:     false,
+		closeMutex: sync.Mutex{},
+		closeOnce:  sync.Once{},
+		source:     config.Source,
 	}
 }
 
@@ -106,7 +101,7 @@ func (c *client) Listen(ctx context.Context) error {
 	go func() {
 		select {
 		case <-ctx.Done():
-			c.logger.Trace("Context canceled, stopping client")
+			c.logger.Debug("Context canceled, stopping client")
 			_ = c.Close()
 		case <-done:
 			// Listen function is done.
@@ -122,9 +117,7 @@ func (c *client) Listen(ctx context.Context) error {
 
 		case msgBytes, ok := <-msgChan:
 			if !ok {
-				if c.logger.Logger.IsLevelEnabled(log.TraceLevel) {
-					c.logger.Trace("WebSocket message channel closed")
-				}
+				c.logger.Debug("WebSocket message channel closed")
 				_ = c.Close()
 				return nil
 			}
@@ -132,28 +125,20 @@ func (c *client) Listen(ctx context.Context) error {
 			// Parse the raw message.
 			msg, err := UnmarshalMessage(msgBytes)
 			if err != nil {
-				c.logger.WithError(err).Error("Failed to parse message")
+				c.logger.Error("Failed to parse message", "error", err)
 				// Continue listening, even if a parse error occurs.
 				continue
 			}
 
 			// Forward the message using safe send (prevents race on channel close)
 			if c.safeSend(msg) {
-				// Only log trace if enabled to reduce overhead
-				if c.logger.Logger.IsLevelEnabled(log.TraceLevel) {
-					c.logger.Trace("Message received and forwarded")
-				}
-				if c.printConfig != nil {
-					Print(msg, c.printConfig)
-				}
+				c.logger.Debug("Message received and forwarded")
 			} else if !c.IsClosed() {
 				c.logger.Warn("GenericMessage channel full, dropping message")
 			}
 
 		case <-ctx.Done():
-			if c.logger.Logger.IsLevelEnabled(log.TraceLevel) {
-				c.logger.Trace("Context canceled in message loop")
-			}
+			c.logger.Debug("Context canceled in message loop")
 			_ = c.Close()
 			return nil
 		}
@@ -185,31 +170,10 @@ func (c *client) safeSend(msg GenericMessage) bool {
 }
 
 // Send is a helper function that handles the common logic for sending messages
-func (c *client) Send(msg any, channelId *ChannelID) error {
+func (c *client) Send(msg any) error {
 	if c.IsClosed() {
 		return fmt.Errorf("client connection is closed")
 	}
-
-	// First add channelId to the message if provided
-	if channelId != nil {
-		switch m := msg.(type) {
-		case RequestMessage:
-			m.ChannelID = string(*channelId)
-			msg = m
-		case ResponseMessage:
-			m.ChannelID = *channelId
-			msg = m
-		case ErrorMessage:
-			m.ChannelID = *channelId
-			msg = m
-		case EventMessage:
-			m.ChannelID = *channelId
-			msg = m
-		}
-	}
-
-	// Log the message we're about to send
-	Print(msg, c.printConfig)
 
 	// Prepare envelope based on the message type
 	var envelope any
@@ -222,10 +186,26 @@ func (c *client) Send(msg any, channelId *ChannelID) error {
 			Type:           TypeRequest,
 			RequestMessage: m,
 		}
+	case *RequestMessage:
+		envelope = struct {
+			Type string `json:"type"`
+			*RequestMessage
+		}{
+			Type:           TypeRequest,
+			RequestMessage: m,
+		}
 	case ResponseMessage:
 		envelope = struct {
 			Type string `json:"type"`
 			ResponseMessage
+		}{
+			Type:            TypeResponse,
+			ResponseMessage: m,
+		}
+	case *ResponseMessage:
+		envelope = struct {
+			Type string `json:"type"`
+			*ResponseMessage
 		}{
 			Type:            TypeResponse,
 			ResponseMessage: m,
@@ -238,18 +218,26 @@ func (c *client) Send(msg any, channelId *ChannelID) error {
 			Type:         TypeError,
 			ErrorMessage: m,
 		}
+	case *ErrorMessage:
+		envelope = struct {
+			Type string `json:"type"`
+			*ErrorMessage
+		}{
+			Type:         TypeError,
+			ErrorMessage: m,
+		}
 	case EventMessage:
-		c.logger.WithFields(log.Fields{
-			"action":      m.Action,
-			"destination": m.Destination,
-			"dest_len":    len(m.Destination),
-			"channel_id":  m.ChannelID,
-			"source":      m.Source,
-		}).Trace("[SDK] Marshaling EventMessage")
-
 		envelope = struct {
 			Type string `json:"type"`
 			EventMessage
+		}{
+			Type:         TypeEvent,
+			EventMessage: m,
+		}
+	case *EventMessage:
+		envelope = struct {
+			Type string `json:"type"`
+			*EventMessage
 		}{
 			Type:         TypeEvent,
 			EventMessage: m,
@@ -260,37 +248,41 @@ func (c *client) Send(msg any, channelId *ChannelID) error {
 
 	// Use pooled buffer for better performance
 	buf := bufferPool.Get().(*bytes.Buffer)
-	defer func() {
-		buf.Reset()
-		bufferPool.Put(buf)
-	}()
 
 	encoder := json.NewEncoder(buf)
 	if err := encoder.Encode(envelope); err != nil {
-		c.logger.WithError(err).Error("Failed to marshal message")
+		buf.Reset()
+		bufferPool.Put(buf)
+		c.logger.Error("Failed to marshal message", "error", err)
 		return fmt.Errorf("failed to marshal message: %w", err)
 	}
 
 	// Remove the trailing newline that Encoder adds
-	data := buf.Bytes()
-	if len(data) > 0 && data[len(data)-1] == '\n' {
-		data = data[:len(data)-1]
+	bufData := buf.Bytes()
+	dataLen := len(bufData)
+	if dataLen > 0 && bufData[dataLen-1] == '\n' {
+		dataLen--
 	}
+
+	// Copy data before returning buffer to pool to avoid race condition
+	// where buffer could be reused before SendMessage completes
+	data := make([]byte, dataLen)
+	copy(data, bufData[:dataLen])
+
+	// Return buffer to pool immediately after copying
+	buf.Reset()
+	bufferPool.Put(buf)
 
 	return c.conn.SendMessage(data)
 }
 
-// SendMessageToChannel sends a message to a specific session
-func (c *client) SendMessageToChannel(channelID ChannelID, msg any) error {
-	return c.Send(msg, &channelID)
+// GetSource returns the message source for this client
+func (c *client) GetSource() MessageSource {
+	return c.source
 }
 
-func (c *client) SendBroadcastMessage(msg any) error {
-	return c.Send(msg, nil)
-}
-
-// sourceToDestination converts a MessageSource to the correct MessageDestination
-func sourceToDestination(source MessageSource) MessageDestination {
+// SourceToDestination converts a MessageSource to the correct MessageDestination
+func SourceToDestination(source MessageSource) MessageDestination {
 	switch source {
 	case SystemWeb:
 		return DestinationWeb
@@ -300,64 +292,8 @@ func sourceToDestination(source MessageSource) MessageDestination {
 		return DestinationAPI
 	default:
 		// For unknown sources, return as-is (will be validated by router)
-		return MessageDestination(source)
+		return source
 	}
-}
-
-func (c *client) SendResponse(req *RequestMessage, payload any) error {
-	return c.Send(ResponseMessage{
-		Action:      req.Action,
-		Payload:     payload,
-		Source:      c.source,
-		Destination: sourceToDestination(req.Source),
-		ChannelID:   req.ChannelID,
-		ReplyTo:     req.RequestID,
-	}, &req.ChannelID)
-}
-
-func (c *client) SendEventToChannel(action MessageAction, payload any, destination MessageDestination, channelID ChannelID) error {
-	return c.Send(EventMessage{
-		Action:      action,
-		Payload:     payload,
-		Source:      c.source,
-		Destination: destination,
-		ChannelID:   channelID,
-	}, &channelID)
-}
-
-// ExtractDestinationFromChannelID extracts the destination prefix from a channel ID
-// For example: "web:session-123" -> "web", "device:device-456" -> "device"
-// This is exported so QueuedClient can use it to build EventMessages correctly
-func ExtractDestinationFromChannelID(channelID ChannelID) MessageDestination {
-	// Handle empty or malformed channel IDs
-	if channelID == "" {
-		return DestinationBroadcast
-	}
-
-	// Split by colon to get the prefix
-	parts := []rune(channelID)
-	for i, r := range parts {
-		if r == ':' {
-			// If colon is at the beginning or prefix is empty, return broadcast
-			if i == 0 {
-				return DestinationBroadcast
-			}
-			return MessageDestination(string(parts[:i]))
-		}
-	}
-	// If no colon found, assume broadcast
-	return DestinationBroadcast
-}
-
-func (c *client) SendErrorToChannel(req *RequestMessage, errResponse ErrorResponse) error {
-	return c.Send(ErrorMessage{
-		Action:      req.Action,
-		Source:      c.source,
-		Destination: sourceToDestination(req.Source),
-		ChannelID:   req.ChannelID,
-		Error:       errResponse,
-		ReplyTo:     req.RequestID,
-	}, &req.ChannelID)
 }
 
 // RegisterWill registers a Last Will message to be sent if connection closes unexpectedly
@@ -367,9 +303,6 @@ func (c *client) RegisterWill(will WillMessage) error {
 	}
 
 	// Print the will message if logging is enabled
-	if c.printConfig != nil {
-		c.logger.WithField("will_action", will.Action).Debug("Registering Last Will")
-	}
 
 	// Prepare envelope for will message
 	envelope := struct {
@@ -382,22 +315,30 @@ func (c *client) RegisterWill(will WillMessage) error {
 
 	// Use pooled buffer for better performance
 	buf := bufferPool.Get().(*bytes.Buffer)
-	defer func() {
-		buf.Reset()
-		bufferPool.Put(buf)
-	}()
 
 	encoder := json.NewEncoder(buf)
 	if err := encoder.Encode(envelope); err != nil {
-		c.logger.WithError(err).Error("Failed to marshal will message")
+		buf.Reset()
+		bufferPool.Put(buf)
+		c.logger.Error("Failed to marshal will message", "error", err)
 		return fmt.Errorf("failed to marshal will message: %w", err)
 	}
 
 	// Remove the trailing newline that Encoder adds
-	data := buf.Bytes()
-	if len(data) > 0 && data[len(data)-1] == '\n' {
-		data = data[:len(data)-1]
+	bufData := buf.Bytes()
+	dataLen := len(bufData)
+	if dataLen > 0 && bufData[dataLen-1] == '\n' {
+		dataLen--
 	}
+
+	// Copy data before returning buffer to pool to avoid race condition
+	// where buffer could be reused before SendMessage completes
+	data := make([]byte, dataLen)
+	copy(data, bufData[:dataLen])
+
+	// Return buffer to pool immediately after copying
+	buf.Reset()
+	bufferPool.Put(buf)
 
 	return c.conn.SendMessage(data)
 }
@@ -423,11 +364,18 @@ func (c *client) Close() error {
 	return c.conn.Close()
 }
 
-// IsClosed returns whether the client is closed.
+// IsClosed returns whether the client is closed or the underlying connection is unavailable.
+// This allows higher-level components (like QueuedClient) to properly detect when the
+// connection is in a reconnecting state, not just when Close() has been explicitly called.
 func (c *client) IsClosed() bool {
 	c.closeMutex.Lock()
-	defer c.closeMutex.Unlock()
-	return c.closed
+	closed := c.closed
+	c.closeMutex.Unlock()
+
+	// Check both the client's closed flag AND the connection's availability
+	// This is important for reconnecting scenarios where the client isn't closed
+	// but the underlying connection is temporarily unavailable
+	return closed || c.conn.IsClosed()
 }
 
 // SendRawJSON sends pre-serialized JSON bytes directly to the connection
@@ -439,4 +387,9 @@ func (c *client) SendRawJSON(jsonBytes []byte) error {
 
 	// Send directly without any processing
 	return c.conn.SendMessage(jsonBytes)
+}
+
+// IsConnectionError delegates to the underlying connection's error detection.
+func (c *client) IsConnectionError(err error) bool {
+	return c.conn.IsConnectionError(err)
 }

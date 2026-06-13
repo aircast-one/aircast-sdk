@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"io"
+	"log/slog"
 )
 
 // TestGoroutineLeaks verifies that no goroutines are leaked
@@ -23,8 +24,7 @@ func TestGoroutineLeaks(t *testing.T) {
 
 	t.Run("Listen goroutine cleanup", func(t *testing.T) {
 		for i := 0; i < 10; i++ {
-			logger := logrus.NewEntry(logrus.New())
-			logger.Logger.SetLevel(logrus.ErrorLevel)
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			conn := NewMockConnection()
 			conn.On("ReadMessage").Return()
 			conn.On("Close").Return(nil)
@@ -71,8 +71,7 @@ func TestGoroutineLeaks(t *testing.T) {
 	t.Run("Multiple client cleanup", func(t *testing.T) {
 		var clients []Client
 		for i := 0; i < 20; i++ {
-			logger := logrus.NewEntry(logrus.New())
-			logger.Logger.SetLevel(logrus.ErrorLevel)
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			conn := NewMockConnection()
 			conn.On("Close").Return(nil)
 
@@ -103,8 +102,7 @@ func TestGoroutineLeaks(t *testing.T) {
 // TestMessageReliability ensures no messages are lost or stuck
 func TestMessageReliability(t *testing.T) {
 	t.Run("No message loss under load", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
-		logger.Logger.SetLevel(logrus.ErrorLevel)
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 		conn.On("ReadMessage").Return()
 		conn.On("Close").Return(nil)
@@ -130,7 +128,7 @@ func TestMessageReliability(t *testing.T) {
 		// Start receiver
 		go func() {
 			for msg := range client.ReadMessage() {
-				if req, ok := msg.(RequestMessage); ok {
+				if req, ok := msg.(*RequestMessage); ok {
 					mu.Lock()
 					received[req.RequestID] = true
 					mu.Unlock()
@@ -141,10 +139,11 @@ func TestMessageReliability(t *testing.T) {
 		// Send messages
 		for i := 0; i < numMessages; i++ {
 			msg := map[string]any{
-				"type":       TypeRequest,
-				"action":     "test_action",
-				"source":     SystemDevice,
-				"request_id": string(rune(i)),
+				"type":        TypeRequest,
+				"action":      "test_action",
+				"source":      SystemDevice,
+				"destination": DestinationAPI,
+				"request_id":  string(rune(i)),
 			}
 			data, _ := json.Marshal(msg)
 			conn.msgCh <- data
@@ -160,8 +159,7 @@ func TestMessageReliability(t *testing.T) {
 	})
 
 	t.Run("Channel buffer overflow handling", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
-		logger.Logger.SetLevel(logrus.ErrorLevel)
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 		conn.On("ReadMessage").Return()
 		conn.On("Close").Return(nil)
@@ -183,10 +181,11 @@ func TestMessageReliability(t *testing.T) {
 		const numMessages = 12000
 		for i := 0; i < numMessages; i++ {
 			msg := map[string]any{
-				"type":       TypeRequest,
-				"action":     "overflow_test",
-				"source":     SystemDevice,
-				"request_id": string(rune(i)),
+				"type":        TypeRequest,
+				"action":      "overflow_test",
+				"source":      SystemDevice,
+				"destination": DestinationAPI,
+				"request_id":  string(rune(i)),
 			}
 			data, _ := json.Marshal(msg)
 
@@ -214,8 +213,7 @@ func TestMessageReliability(t *testing.T) {
 	})
 
 	t.Run("No stuck messages", func(t *testing.T) {
-		logger := logrus.NewEntry(logrus.New())
-		logger.Logger.SetLevel(logrus.ErrorLevel)
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 		conn.On("ReadMessage").Return()
 		conn.On("Close").Return(nil)
@@ -235,10 +233,11 @@ func TestMessageReliability(t *testing.T) {
 
 		// Send a message
 		msg := map[string]any{
-			"type":       TypeRequest,
-			"action":     "test_stuck",
-			"source":     SystemDevice,
-			"request_id": "req-stuck",
+			"type":        TypeRequest,
+			"action":      "test_stuck",
+			"source":      SystemDevice,
+			"destination": DestinationAPI,
+			"request_id":  "req-stuck",
 		}
 		data, _ := json.Marshal(msg)
 		conn.msgCh <- data
@@ -246,7 +245,7 @@ func TestMessageReliability(t *testing.T) {
 		// Message should be received within reasonable time
 		select {
 		case receivedMsg := <-client.ReadMessage():
-			req, ok := receivedMsg.(RequestMessage)
+			req, ok := receivedMsg.(*RequestMessage)
 			require.True(t, ok)
 			assert.Equal(t, "req-stuck", req.RequestID)
 		case <-time.After(100 * time.Millisecond):
@@ -257,8 +256,7 @@ func TestMessageReliability(t *testing.T) {
 
 // TestConcurrentSendReliability ensures thread safety
 func TestConcurrentSendReliability(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	// Track sent messages
 	var sentCount int64
@@ -293,7 +291,7 @@ func TestConcurrentSendReliability(t *testing.T) {
 					Payload:   map[string]int{"id": id, "seq": j},
 				}
 
-				err := client.Send(msg, nil)
+				err := client.Send(msg)
 				if err != nil {
 					atomic.AddInt64(&errorCount, 1)
 				}
@@ -312,8 +310,7 @@ func TestConcurrentSendReliability(t *testing.T) {
 // TestClientCloseRaceCondition tests for race conditions during close
 func TestClientCloseRaceCondition(t *testing.T) {
 	for i := 0; i < 100; i++ {
-		logger := logrus.NewEntry(logrus.New())
-		logger.Logger.SetLevel(logrus.ErrorLevel)
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 		conn := NewMockConnection()
 		conn.On("SendMessage", mock.Anything).Return(nil).Maybe()
 		conn.On("Close").Return(nil)
@@ -345,7 +342,7 @@ func TestClientCloseRaceCondition(t *testing.T) {
 					Source:  SystemDevice,
 					Payload: map[string]string{"test": "data"},
 				}
-				_ = client.Send(msg, nil)
+				_ = client.Send(msg)
 				time.Sleep(time.Microsecond)
 			}
 		}()
@@ -375,8 +372,7 @@ func TestClientCloseRaceCondition(t *testing.T) {
 
 // TestMessageChannelDeadlock tests for potential deadlocks
 func TestMessageChannelDeadlock(t *testing.T) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	conn := NewMockConnection()
 	conn.On("ReadMessage").Return()
 	conn.On("Close").Return(nil)
@@ -397,10 +393,11 @@ func TestMessageChannelDeadlock(t *testing.T) {
 	// Fill the message channel
 	for i := 0; i < 600; i++ { // More than buffer size
 		msg := map[string]any{
-			"type":       TypeRequest,
-			"action":     "deadlock_test",
-			"source":     SystemDevice,
-			"request_id": string(rune(i)),
+			"type":        TypeRequest,
+			"action":      "deadlock_test",
+			"source":      SystemDevice,
+			"destination": DestinationAPI,
+			"request_id":  string(rune(i)),
 		}
 		data, _ := json.Marshal(msg)
 
@@ -435,8 +432,7 @@ func TestMemoryLeaks(t *testing.T) {
 		t.Skip("Skipping memory leak test in short mode")
 	}
 
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	conn := NewMockConnection()
 	conn.On("SendMessage", mock.Anything).Return(nil)
 	conn.On("IsClosed").Return(false)
@@ -474,14 +470,15 @@ func TestMemoryLeaks(t *testing.T) {
 				"data":  "test data that should not leak",
 			},
 		}
-		_ = client.Send(msg, nil)
+		_ = client.Send(msg)
 
 		// Receive message
 		testMsg := map[string]any{
-			"type":       TypeRequest,
-			"action":     "memory_test",
-			"source":     SystemDevice,
-			"request_id": string(rune(i)),
+			"type":        TypeRequest,
+			"action":      "memory_test",
+			"source":      SystemDevice,
+			"destination": DestinationAPI,
+			"request_id":  string(rune(i)),
 		}
 		data, _ := json.Marshal(testMsg)
 		conn.msgCh <- data
@@ -518,8 +515,7 @@ func TestMemoryLeaks(t *testing.T) {
 
 // BenchmarkMessageReliability benchmarks message processing reliability
 func BenchmarkMessageReliability(b *testing.B) {
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	conn := NewMockConnection()
 	conn.On("ReadMessage").Return()
 	conn.On("Close").Return(nil)
@@ -539,10 +535,11 @@ func BenchmarkMessageReliability(b *testing.B) {
 
 	// Prepare message
 	msg := map[string]any{
-		"type":       TypeRequest,
-		"action":     "bench_reliability",
-		"source":     SystemDevice,
-		"request_id": "req-bench",
+		"type":        TypeRequest,
+		"action":      "bench_reliability",
+		"source":      SystemDevice,
+		"destination": DestinationAPI,
+		"request_id":  "req-bench",
 	}
 	data, _ := json.Marshal(msg)
 

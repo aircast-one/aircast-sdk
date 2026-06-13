@@ -10,8 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
+	"io"
+	"log/slog"
 )
 
 // StressTestConnection simulates network conditions
@@ -67,6 +68,10 @@ func (c *StressTestConnection) IsClosed() bool {
 	return c.closed
 }
 
+func (c *StressTestConnection) IsConnectionError(_ error) bool {
+	return false
+}
+
 func (c *StressTestConnection) GetSendErrors() int64 {
 	return atomic.LoadInt64(&c.sendErrors)
 }
@@ -77,8 +82,7 @@ func TestHighVolumeMessageProcessing(t *testing.T) {
 		t.Skip("Skipping high volume test in short mode")
 	}
 
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	conn := NewStressTestConnection(0.0, 0)
 	config := ClientConfig{
@@ -108,10 +112,11 @@ func TestHighVolumeMessageProcessing(t *testing.T) {
 	// Send high volume of messages
 	for i := range numMessages {
 		msg := map[string]any{
-			"type":    TypeEvent,
-			"action":  "high_volume_test",
-			"source":  SystemDevice,
-			"payload": map[string]int{"sequence": i},
+			"type":        TypeEvent,
+			"action":      "high_volume_test",
+			"source":      SystemDevice,
+			"destination": DestinationWeb,
+			"payload":     map[string]int{"sequence": i},
 		}
 		data, _ := json.Marshal(msg)
 
@@ -177,8 +182,7 @@ func TestConcurrentClientsStress(t *testing.T) {
 
 	// Create clients
 	for i := range numClients {
-		logger := logrus.NewEntry(logrus.New())
-		logger.Logger.SetLevel(logrus.ErrorLevel)
+		logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 		conn := NewStressTestConnection(0.01, time.Microsecond) // 1% drop rate
 		connections[i] = conn
@@ -223,17 +227,18 @@ func TestConcurrentClientsStress(t *testing.T) {
 					},
 				}
 
-				err := c.Send(msg, nil)
+				err := c.Send(msg)
 				if err == nil {
 					atomic.AddInt64(&totalSent, 1)
 				}
 
 				// Send test message to self
 				testMsg := map[string]any{
-					"type":    TypeEvent,
-					"action":  "self_test",
-					"source":  SystemDevice,
-					"payload": map[string]int{"client": clientID, "seq": j},
+					"type":        TypeEvent,
+					"action":      "self_test",
+					"source":      SystemDevice,
+					"destination": DestinationWeb,
+					"payload":     map[string]int{"client": clientID, "seq": j},
 				}
 				data, _ := json.Marshal(testMsg)
 				connections[clientID].msgCh <- data
@@ -276,8 +281,7 @@ func TestMemoryPressure(t *testing.T) {
 		t.Skip("Skipping memory pressure test in short mode")
 	}
 
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	conn := NewStressTestConnection(0.0, 0)
 	config := ClientConfig{
@@ -310,11 +314,12 @@ func TestMemoryPressure(t *testing.T) {
 	const numLargeMessages = 100
 	for i := 0; i < numLargeMessages; i++ {
 		msg := map[string]any{
-			"type":       TypeRequest,
-			"action":     "memory_pressure_test",
-			"source":     SystemDevice,
-			"request_id": fmt.Sprintf("req_%d", i),
-			"payload":    largePayload,
+			"type":        TypeRequest,
+			"action":      "memory_pressure_test",
+			"source":      SystemDevice,
+			"destination": DestinationAPI,
+			"request_id":  fmt.Sprintf("req_%d", i),
+			"payload":     largePayload,
 		}
 		data, _ := json.Marshal(msg)
 
@@ -360,8 +365,7 @@ func TestNetworkSimulation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			logger := logrus.NewEntry(logrus.New())
-			logger.Logger.SetLevel(logrus.ErrorLevel)
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 			conn := NewStressTestConnection(tt.dropRate, tt.latency)
 			config := ClientConfig{
@@ -394,16 +398,17 @@ func TestNetworkSimulation(t *testing.T) {
 					Payload: map[string]int{"seq": i},
 				}
 
-				err := client.Send(msg, nil)
+				err := client.Send(msg)
 				if err == nil {
 					atomic.AddInt64(&sent, 1)
 				}
 
 				// Send test message
 				testMsg := map[string]any{
-					"type":   TypeEvent,
-					"action": "network_test",
-					"source": SystemDevice,
+					"type":        TypeEvent,
+					"action":      "network_test",
+					"source":      SystemDevice,
+					"destination": DestinationWeb,
 				}
 				data, _ := json.Marshal(testMsg)
 				conn.msgCh <- data
@@ -436,8 +441,7 @@ func TestGoroutineStorm(t *testing.T) {
 	const numGoroutines = 1000
 	var wg sync.WaitGroup
 
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	conn := NewStressTestConnection(0.0, 0)
 	config := ClientConfig{
@@ -470,7 +474,7 @@ func TestGoroutineStorm(t *testing.T) {
 					Payload: map[string]int{"goroutine": id, "op": j},
 				}
 
-				_ = client.Send(msg, nil)
+				_ = client.Send(msg)
 				atomic.AddInt64(&operations, 1)
 
 				// Small delay
@@ -497,8 +501,7 @@ func TestResourceExhaustion(t *testing.T) {
 	}
 
 	// Test with very small buffer
-	logger := logrus.NewEntry(logrus.New())
-	logger.Logger.SetLevel(logrus.ErrorLevel)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	conn := NewStressTestConnection(0.0, 0)
 	config := ClientConfig{
@@ -528,9 +531,10 @@ func TestResourceExhaustion(t *testing.T) {
 	// Fast producer
 	for range numMessages {
 		msg := map[string]any{
-			"type":   TypeEvent,
-			"action": "resource_exhaustion",
-			"source": SystemDevice,
+			"type":        TypeEvent,
+			"action":      "resource_exhaustion",
+			"source":      SystemDevice,
+			"destination": DestinationWeb,
 		}
 		data, _ := json.Marshal(msg)
 
