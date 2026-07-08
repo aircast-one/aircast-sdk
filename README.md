@@ -204,19 +204,19 @@ stats := queuedClient.GetQueueStats()
 ### Run All Tests
 
 ```bash
-make test
+just test
 ```
 
 ### Run Tests with Coverage
 
 ```bash
-make test.coverage
+just test-coverage
 ```
 
 ### Generate HTML Coverage Report
 
 ```bash
-make test.coverage.html
+just coverage html
 ```
 
 ### Run Benchmarks
@@ -227,28 +227,28 @@ go test -bench=. ./pkg/message/
 
 ## Development
 
-### Available Make Targets
+### Available Just Recipes
 
 ```bash
-make help           # Show all available targets
-make test           # Run tests
-make lint           # Run linter
-make fmt            # Format code
-make vet            # Run go vet
-make check          # Run all checks (fmt, vet, lint, test)
-make clean          # Clean generated files
+just               # List all available recipes
+just test          # Run tests
+just lint          # Run linter
+just fmt           # Format code
+just vet           # Run go vet
+just check         # Run all checks (fmt, vet, lint, test)
+just clean         # Clean generated files
 ```
 
 ### Version Management
 
 ```bash
-make version        # Show current version
-make version.patch  # Create patch version (v1.0.0 -> v1.0.1)
-make version.minor  # Create minor version (v1.0.0 -> v1.1.0)
-make version.major  # Create major version (v1.0.0 -> v2.0.0)
-make version.dev    # Create dev version (v1.0.0-dev.1)
-make version.alpha  # Create alpha version (v1.0.0-alpha.1)
-make version.rc     # Create release candidate (v1.0.0-rc.1)
+just version         # Show current version
+just release patch   # Create patch version (v1.0.0 -> v1.0.1)
+just release minor   # Create minor version (v1.0.0 -> v1.1.0)
+just release major   # Create major version (v1.0.0 -> v2.0.0)
+just release dev     # Create dev version (v1.0.0-dev.1)
+just release alpha   # Create alpha version (v1.0.0-alpha.1)
+just release rc      # Create release candidate (v1.0.0-rc.1)
 ```
 
 ## Architecture
@@ -299,7 +299,7 @@ Contributions are welcome! Please:
 ### Development Guidelines
 
 - Maintain test coverage above 80%
-- Run `make check` before committing
+- Run `just check` before committing
 - Follow Go best practices and idioms
 - Add benchmarks for performance-critical code
 - Update documentation for API changes
